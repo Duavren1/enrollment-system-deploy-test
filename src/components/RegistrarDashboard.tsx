@@ -166,7 +166,6 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
 
   // Requirements Management state
   const [reqReviewList, setReqReviewList] = useState<any[]>([]);
-  const [reqOvrList, setReqOvrList] = useState<any[]>([]);
   const [reqLoading, setReqLoading] = useState(false);
   const [reqTab, setReqTab] = useState('requirements');
   const [reqReviewRemarks, setReqReviewRemarks] = useState('');
@@ -328,12 +327,8 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
       } else if (activeSection === 'Requirements Management') {
         try {
           setReqLoading(true);
-          const [reqResp, ovrResp] = await Promise.all([
-            registrarService.getRequirementsForReview(),
-            registrarService.getOvrRequests(),
-          ]);
+          const reqResp = await registrarService.getRequirementsForReview();
           setReqReviewList(reqResp?.requirements || []);
-          setReqOvrList(ovrResp?.ovrRequests || []);
         } catch (err) {
           console.error('Failed to load requirements data:', err);
         } finally {
@@ -2089,12 +2084,8 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
   const refreshReqData = async () => {
     try {
       setReqLoading(true);
-      const [reqResp, ovrResp] = await Promise.all([
-        registrarService.getRequirementsForReview(),
-        registrarService.getOvrRequests(),
-      ]);
+      const reqResp = await registrarService.getRequirementsForReview();
       setReqReviewList(reqResp?.requirements || []);
-      setReqOvrList(ovrResp?.ovrRequests || []);
     } catch (err) {
       console.error('Failed to refresh requirements:', err);
     } finally {
@@ -2130,15 +2121,6 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
     }
   };
 
-  const handleOvrEvaluate = async (id: number, status: string, remarks: string) => {
-    try {
-      await registrarService.evaluateOvrRequest(id, { status, registrar_remarks: remarks });
-      await refreshReqData();
-    } catch (err) {
-      console.error('Failed to evaluate OVR:', err);
-    }
-  };
-
   const reqStatusBadge = (status: string) => {
     const map: Record<string, string> = {
       Pending: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -2166,8 +2148,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
 
     const reqTabs = [
       { key: 'requirements', label: 'Document Requirements', count: reqReviewList.length },
-      { key: 'hardcopy', label: 'Hard Copy Tracking', count: reqReviewList.filter((r: any) => r.hard_copy_submitted && !r.hard_copy_received_at).length },
-      { key: 'ovr', label: 'OVR Requests', count: reqOvrList.length },
+      { key: 'hardcopy', label: 'Hard Copy Tracking', count: reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1 && !r.hard_copy_received_at).length },
     ];
 
     return (
@@ -2246,13 +2227,18 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
         {/* ── Hard Copy Tracking ── */}
         {reqTab === 'hardcopy' && (
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-1">Hard Copy Tracking</h3>
-            <p className="text-sm text-slate-500 mb-4">Confirm receipt of physical documents from students.</p>
-            {reqReviewList.filter((r: any) => r.hard_copy_submitted).length === 0 ? (
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">Hard Copy Tracking</h3>
+                <p className="text-sm text-slate-500">Confirm receipt of physical documents from students.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={refreshReqData}>Refresh</Button>
+            </div>
+            {reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1).length === 0 ? (
               <p className="text-sm text-slate-500 text-center py-8">No hard copies tagged for submission yet.</p>
             ) : (
               <div className="space-y-3">
-                {reqReviewList.filter((r: any) => r.hard_copy_submitted).map((req: any) => (
+                {reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1).map((req: any) => (
                   <div key={req.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
                     <div>
                       <p className="font-medium text-sm">{req.first_name} {req.last_name} — {req.requirement_name}</p>
@@ -2280,60 +2266,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
 
 
 
-        {/* ── OVR Requests ── */}
-        {reqTab === 'ovr' && (
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold">OVR (Overload) Requests</h3>
-                <p className="text-sm text-slate-500">Evaluate student requests to take additional units.</p>
-              </div>
-            </div>
-            {reqOvrList.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-8">No OVR requests.</p>
-            ) : (
-              <div className="space-y-3">
-                {reqOvrList.map((req: any) => (
-                  <div key={req.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-medium text-sm">{req.first_name} {req.last_name} <span className="text-slate-400 font-normal">({req.student_number})</span></p>
-                        <p className="text-xs text-slate-500">{req.course} · {req.school_year} / {req.semester}</p>
-                      </div>
-                      {reqStatusBadge(req.status)}
-                    </div>
-                    <div className="text-sm text-slate-700 mb-1">
-                      Requested Units: <span className="font-medium">{req.requested_units}</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mb-2">Reason: {req.reason}</p>
-                    {req.status === 'Pending' && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <Input
-                          placeholder="Registrar remarks"
-                          className="h-8 text-xs flex-1"
-                          id={`ovr-remarks-${req.id}`}
-                        />
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 h-8 text-xs"
-                          onClick={() => {
-                            const el = document.getElementById(`ovr-remarks-${req.id}`) as HTMLInputElement;
-                            handleOvrEvaluate(req.id, 'Approved', el?.value || '');
-                          }}>Approve</Button>
-                        <Button size="sm" variant="destructive" className="h-8 text-xs"
-                          onClick={() => {
-                            const el = document.getElementById(`ovr-remarks-${req.id}`) as HTMLInputElement;
-                            handleOvrEvaluate(req.id, 'Denied', el?.value || '');
-                          }}>Deny</Button>
-                      </div>
-                    )}
-                    {req.registrar_remarks && (
-                      <p className="text-xs text-orange-600 mt-1">Remarks: {req.registrar_remarks}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
+
       </div>
     );
   };
@@ -2478,7 +2411,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                   {activeSection === 'COR Management' && 'Generate and manage Certification of Registration'}
                   {activeSection === 'Clearances' && 'Resolve student clearance issues and requirements'}
                   {activeSection === 'Subject Management' && 'Modify subjects of students with full audit trail'}
-                  {activeSection === 'Requirements Management' && 'Review requirements, crediting requests, and OVR evaluations'}
+                  {activeSection === 'Requirements Management' && 'Review requirements and crediting requests'}
                 </p>
               </div>
               <div className="flex items-center gap-3">

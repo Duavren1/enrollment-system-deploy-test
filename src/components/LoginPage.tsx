@@ -2,14 +2,6 @@ import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Checkbox } from './ui/checkbox';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
 import {
   Dialog,
   DialogContent,
@@ -17,15 +9,19 @@ import {
   DialogTitle,
   DialogDescription,
 } from './ui/dialog';
-import { GraduationCap, Lock, User } from 'lucide-react';
+import {
+  Lock, User, Search, Loader2 as Spinner, CheckCircle, Clock, XCircle, AlertCircle,
+} from 'lucide-react';
 import { UserRole } from '../App';
 import { authService } from '../services/auth.service';
+import { preRegistrationService } from '../services/preregistration.service';
 
 interface LoginPageProps {
   onLogin: (role: UserRole) => void;
+  onPreRegister?: () => void;
 }
 
-export default function LoginPage({ onLogin }: LoginPageProps) {
+export default function LoginPage({ onLogin, onPreRegister }: LoginPageProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,34 +29,49 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [captchaA, setCaptchaA] = useState(0);
   const [captchaB, setCaptchaB] = useState(0);
   const [captchaAnswer, setCaptchaAnswer] = useState('');
-  const [showRegister, setShowRegister] = useState(false);
-  const [privacyConsented, setPrivacyConsented] = useState(false);
-  const [marketingConsent, setMarketingConsent] = useState(false);
-  const [regForm, setRegForm] = useState<any>({
-    student_id: '',
-    username: '',
-    password: '',
-    confirmPassword: '',
-    email: '',
-    first_name: '',
-    middle_name: '',
-    last_name: '',
-    suffix: '',
-    student_type: 'New',
-    course: '',
-    year_level: 1,
-    contact_number: '',
-    address: '',
-    birth_date: '',
-    gender: '',
-    last_school_attended: '',
-    preferred_contact_method: '',
-    heard_about_informatics: ''
-  });
-  const [regLoading, setRegLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [forgotValue, setForgotValue] = useState('');
   const [forgotMessage, setForgotMessage] = useState('');
+
+  // Pre-registration tracking
+  const [trackRefId, setTrackRefId] = useState('');
+  const [trackResult, setTrackResult] = useState<any>(null);
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackError, setTrackError] = useState('');
+
+  const handleTrack = async () => {
+    if (!trackRefId.trim()) return;
+    try {
+      setTrackLoading(true);
+      setTrackError('');
+      setTrackResult(null);
+      const resp = await preRegistrationService.trackApplication(trackRefId.trim());
+      if (resp.success) {
+        setTrackResult(resp.data);
+      } else {
+        setTrackError(resp.message || 'Application not found.');
+      }
+    } catch (err: any) {
+      setTrackError(err.message || 'Application not found.');
+    } finally {
+      setTrackLoading(false);
+    }
+  };
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, { color: string; icon: any }> = {
+      'Pending Payment': { color: 'bg-yellow-100 text-yellow-800', icon: Clock },
+      'Payment Submitted': { color: 'bg-blue-100 text-blue-800', icon: Clock },
+      'Payment Verified': { color: 'bg-green-100 text-green-800', icon: CheckCircle },
+      'Payment Rejected': { color: 'bg-red-100 text-red-800', icon: XCircle },
+      'In Admin Queue': { color: 'bg-indigo-100 text-indigo-800', icon: Clock },
+      'Account Created': { color: 'bg-emerald-100 text-emerald-800', icon: CheckCircle },
+      'Rejected': { color: 'bg-red-100 text-red-800', icon: XCircle },
+    };
+    const m = map[status] || { color: 'bg-slate-100 text-slate-800', icon: AlertCircle };
+    const Icon = m.icon;
+    return <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${m.color}`}><Icon className="h-3 w-3" />{status}</span>;
+  };
 
   // Captcha generation
   const generateCaptcha = () => {
@@ -201,10 +212,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                     <p className="text-sm text-red-600 text-center">{error}</p>
                   )}
 
-                  {/* Register Link */}
-                  <div className="text-center">
-                    <a href="#" onClick={(e) => { e.preventDefault(); setShowRegister(true); }} className="text-sm text-blue-600 hover:text-blue-700">Register as a new student</a>
-                  </div>
+                  {/* Register Link — redirects to Pre-Registration */}
+                  {onPreRegister && (
+                    <div className="text-center">
+                      <a href="#" onClick={(e) => { e.preventDefault(); onPreRegister(); }} className="text-sm text-blue-600 hover:text-blue-700">Register as a new student</a>
+                    </div>
+                  )}
 
                   {/* Submit Button */}
                   <Button
@@ -225,279 +238,56 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   Need help? Contact support
                 </div>
               </div>
+
+              {/* Track Application Card */}
+              <div className="bg-white rounded-3xl shadow-lg p-6 border border-slate-200 mt-6">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <Search className="h-4 w-4" /> Track Pre-Registration
+                </h3>
+                <div className="flex gap-2">
+                  <Input
+                    value={trackRefId}
+                    onChange={(e) => setTrackRefId(e.target.value)}
+                    placeholder="Enter Reference ID (e.g. PRE-2026-XXXX)"
+                    className="h-10 rounded-xl text-sm"
+                    onKeyDown={(e) => e.key === 'Enter' && handleTrack()}
+                  />
+                  <Button size="sm" onClick={handleTrack} disabled={trackLoading} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl px-4">
+                    {trackLoading ? <Spinner className="h-4 w-4 animate-spin" /> : 'Track'}
+                  </Button>
+                </div>
+                {trackError && <p className="text-xs text-red-600 mt-2">{trackError}</p>}
+                {trackResult && (
+                  <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-sm">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Status</span>
+                      {statusBadge(trackResult.status)}
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Name</span>
+                      <span className="font-medium">{trackResult.first_name} {trackResult.last_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Course</span>
+                      <span className="font-medium">{trackResult.course}</span>
+                    </div>
+                    {trackResult.status === 'Account Created' && (
+                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg text-green-800 text-xs">
+                        ✅ Your account has been created! Check your email for login credentials.
+                      </div>
+                    )}
+                    {trackResult.status === 'Payment Rejected' && trackResult.cashier_remarks && (
+                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-red-800 text-xs">
+                        Rejection Reason: {trackResult.cashier_remarks}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
-      {/* Registration Dialog */}
-      <Dialog open={showRegister} onOpenChange={(open) => {
-        setShowRegister(open);
-        if (!open) {
-          setPrivacyConsented(false);
-          setMarketingConsent(false);
-        }
-      }}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          {!privacyConsented ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>Data Privacy Notice</DialogTitle>
-                <DialogDescription>Please read and consent before proceeding to registration.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 text-sm text-slate-700">
-                <p>
-                  Informatics believes in the sanctity of personal information and the rights of individuals to Data Privacy per <strong>Republic Act 10173 – Data Privacy Act of 2012</strong>. Thus, Informatics is committed to the protection and responsible usage of such information. Informatics will only collect, use, and disclose your personal information with your knowledge and consent.
-                </p>
-                <p>
-                  You may access the complete Data Privacy Act of 2012 at{' '}
-                  <a href="https://privacy.gov.ph/data-privacy-act/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">
-                    https://privacy.gov.ph/data-privacy-act/
-                  </a>
-                </p>
-                <div className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-lg p-4 mt-4">
-                  <Checkbox
-                    id="marketing-consent"
-                    checked={marketingConsent}
-                    onCheckedChange={(checked) => setMarketingConsent(checked === true)}
-                    className="mt-0.5"
-                  />
-                  <label htmlFor="marketing-consent" className="text-sm leading-relaxed cursor-pointer">
-                    I consent to receive marketing communications, updates, and newsletters from Informatics Philippines. I understand my data will be handled in accordance with the Privacy Policy.
-                  </label>
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end mt-4">
-                <Button variant="outline" onClick={() => setShowRegister(false)}>Cancel</Button>
-                <Button disabled={!marketingConsent} onClick={() => setPrivacyConsented(true)}>
-                  Proceed to Registration
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <DialogHeader>
-                <DialogTitle>Student Registration</DialogTitle>
-                <DialogDescription>Fill out the form below to register as a new student.</DialogDescription>
-              </DialogHeader>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-2 text-sm">
-                <p className="font-semibold text-blue-900 mb-2">Important Instructions:</p>
-                <ul className="space-y-1 text-blue-900">
-                  <li>• Choose a <strong>username</strong> — this will be your login credential</li>
-                  <li>• Your account must be <strong>approved by an admin</strong> before you can sign in</li>
-                  <li>• Please wait for approval notification after submitting your registration</li>
-                </ul>
-              </div>
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                if (!regForm.username) return alert('Username is required');
-                if (!regForm.password || regForm.password.length < 6) return alert('Password must be at least 6 characters');
-                if (regForm.password !== regForm.confirmPassword) return alert('Passwords do not match');
-                if (!regForm.first_name) return alert('First Name is required');
-                if (!regForm.last_name) return alert('Last Name is required');
-                if (!regForm.birth_date) return alert('Birth Date is required');
-                if (!regForm.gender) return alert('Sex is required');
-                if (!regForm.email) return alert('Email Address is required');
-                if (!regForm.contact_number) return alert('Contact Number is required');
-                if (!regForm.last_school_attended) return alert('Last School Attended is required');
-                if (!regForm.address) return alert('Address is required');
-                if (!regForm.course) return alert('Course selection is required');
-                if (!regForm.preferred_contact_method) return alert('Preferred Contact Method is required');
-                if (!regForm.heard_about_informatics) return alert('Please tell us how you heard about Informatics');
-                try {
-                  setRegLoading(true);
-                  const payload = {
-                    username: regForm.username,
-                    password: regForm.password,
-                    email: regForm.email,
-                    role: 'student',
-                    student: {
-                      student_id: regForm.student_id,
-                      first_name: regForm.first_name,
-                      middle_name: regForm.middle_name,
-                      last_name: regForm.last_name,
-                      suffix: regForm.suffix,
-                      student_type: regForm.student_type,
-                      course: regForm.course,
-                      year_level: regForm.year_level,
-                      contact_number: regForm.contact_number,
-                      address: regForm.address,
-                      birth_date: regForm.birth_date,
-                      gender: regForm.gender,
-                      last_school_attended: regForm.last_school_attended,
-                      preferred_contact_method: regForm.preferred_contact_method,
-                      heard_about_informatics: regForm.heard_about_informatics
-                    }
-                  };
-
-                  const resp = await authService.register(payload as any);
-                  if (resp.success) {
-                    alert('Registration submitted successfully! Your account is pending admin approval. You will be able to sign in once your account has been approved.');
-                    setShowRegister(false);
-                    setPrivacyConsented(false);
-                    setMarketingConsent(false);
-                    setRegForm({ student_id: '', username: '', password: '', confirmPassword: '', email: '', first_name: '', middle_name: '', last_name: '', suffix: '', student_type: 'New', course: '', year_level: 1, contact_number: '', address: '', birth_date: '', gender: '', last_school_attended: '', preferred_contact_method: '' });
-                  } else {
-                    alert(resp.message || 'Registration failed');
-                  }
-                } catch (err: any) {
-                  alert(err.message || 'Registration failed');
-                } finally {
-                  setRegLoading(false);
-                }
-              }} className="space-y-3">
-                {/* Username (chosen by user) */}
-                <div>
-                  <Label>Username <span className="text-red-500">*</span></Label>
-                  <Input value={regForm.username} onChange={(e) => setRegForm({ ...regForm, username: e.target.value })} className="mt-1" placeholder="Choose a username" required />
-                </div>
-
-                {/* Password & Confirm Password */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Password <span className="text-red-500">*</span></Label>
-                    <Input type="password" value={regForm.password} onChange={(e) => setRegForm({ ...regForm, password: e.target.value })} className="mt-1" required />
-                  </div>
-                  <div>
-                    <Label>Confirm Password <span className="text-red-500">*</span></Label>
-                    <Input type="password" value={regForm.confirmPassword} onChange={(e) => setRegForm({ ...regForm, confirmPassword: e.target.value })} className="mt-1" required />
-                  </div>
-                </div>
-
-                {/* First Name, Middle Name (optional) */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>First Name <span className="text-red-500">*</span></Label>
-                    <Input value={regForm.first_name} onChange={(e) => setRegForm({ ...regForm, first_name: e.target.value.replace(/[^a-zA-Z\s]/g, '') })} className="mt-1" required />
-                  </div>
-                  <div>
-                    <Label>Middle Name <span className="text-slate-400 text-xs">(optional)</span></Label>
-                    <Input value={regForm.middle_name} onChange={(e) => setRegForm({ ...regForm, middle_name: e.target.value.replace(/[^a-zA-Z\s]/g, '') })} className="mt-1" />
-                  </div>
-                </div>
-
-                {/* Last Name, Suffix (optional) */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Last Name <span className="text-red-500">*</span></Label>
-                    <Input value={regForm.last_name} onChange={(e) => setRegForm({ ...regForm, last_name: e.target.value.replace(/[^a-zA-Z\s]/g, '') })} className="mt-1" required />
-                  </div>
-                  <div>
-                    <Label>Suffix <span className="text-slate-400 text-xs">(optional)</span></Label>
-                    <Input value={regForm.suffix} onChange={(e) => setRegForm({ ...regForm, suffix: e.target.value })} className="mt-1" placeholder="e.g. Jr., III" />
-                  </div>
-                </div>
-
-                {/* Birth Date, Sex */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Birth Date <span className="text-red-500">*</span></Label>
-                    <Input type="date" value={regForm.birth_date} onChange={(e) => setRegForm({ ...regForm, birth_date: e.target.value })} className="mt-1" required />
-                  </div>
-                  <div>
-                    <Label>Sex <span className="text-red-500">*</span></Label>
-                    <Select value={regForm.gender} onValueChange={(val) => setRegForm({ ...regForm, gender: val })}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select sex" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Male">Male</SelectItem>
-                        <SelectItem value="Female">Female</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Email, Contact Number */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Email Address <span className="text-red-500">*</span></Label>
-                    <Input type="email" value={regForm.email} onChange={(e) => setRegForm({ ...regForm, email: e.target.value })} className="mt-1" required />
-                  </div>
-                  <div>
-                    <Label>Contact Number <span className="text-red-500">*</span></Label>
-                    <Input value={regForm.contact_number} onChange={(e) => setRegForm({ ...regForm, contact_number: e.target.value })} className="mt-1" placeholder="e.g. 09171234567" required />
-                  </div>
-                </div>
-
-                {/* Last School Attended */}
-                <div>
-                  <Label>Last School Attended <span className="text-red-500">*</span></Label>
-                  <Input value={regForm.last_school_attended} onChange={(e) => setRegForm({ ...regForm, last_school_attended: e.target.value })} className="mt-1" required />
-                </div>
-
-                {/* Address */}
-                <div>
-                  <Label>Address <span className="text-red-500">*</span></Label>
-                  <Input value={regForm.address} onChange={(e) => setRegForm({ ...regForm, address: e.target.value })} className="mt-1" placeholder="Complete address" required />
-                </div>
-
-                {/* Year Level, Course, Preferred Contact Method */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>Year Level <span className="text-red-500">*</span></Label>
-                    <Select value={String(regForm.year_level)} onValueChange={(val) => setRegForm({ ...regForm, year_level: parseInt(val) })}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select year" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">1st Year</SelectItem>
-                        <SelectItem value="2">2nd Year</SelectItem>
-                        <SelectItem value="3">3rd Year</SelectItem>
-                        <SelectItem value="4">4th Year</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Course <span className="text-red-500">*</span></Label>
-                    <Select value={regForm.course} onValueChange={(val) => setRegForm({ ...regForm, course: val })}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select course" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="BSIT">BSIT</SelectItem>
-                        <SelectItem value="BSCS">BSCS</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Contact Method <span className="text-red-500">*</span></Label>
-                    <Select value={regForm.preferred_contact_method} onValueChange={(val) => setRegForm({ ...regForm, preferred_contact_method: val })}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Email">Email</SelectItem>
-                        <SelectItem value="Number">Number</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>How did you hear about Informatics? <span className="text-red-500">*</span></Label>
-                    <Select value={regForm.heard_about_informatics} onValueChange={(val) => setRegForm({ ...regForm, heard_about_informatics: val })}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select an option" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Referral">Referral</SelectItem>
-                        <SelectItem value="Career Talk">Career Talk</SelectItem>
-                        <SelectItem value="Building Signage">Building Signage</SelectItem>
-                        <SelectItem value="Facebook">Facebook</SelectItem>
-                        <SelectItem value="Website">Website</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 justify-end pt-2">
-                  <Button variant="outline" type="button" onClick={() => setShowRegister(false)}>Cancel</Button>
-                  <Button type="submit" disabled={regLoading}>{regLoading ? 'Registering...' : 'Register'}</Button>
-                </div>
-              </form>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
       {/* Forgot Password Dialog */}
       <Dialog open={showForgot} onOpenChange={setShowForgot}>
         <DialogContent>

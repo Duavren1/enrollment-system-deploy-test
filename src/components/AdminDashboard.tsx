@@ -26,7 +26,8 @@ import {
   X,
   Check as CheckIcon,
   Loader2,
-  Search
+  Search,
+  RefreshCw
 } from 'lucide-react';
 import { adminService } from '../services/admin.service';
 import { enrollmentService } from '../services/enrollment.service';
@@ -38,6 +39,7 @@ import { maintenanceService } from '../services/maintenance.service';
 import analyticsService from '../services/analytics.service';
 import logsService from '../services/logs.service';
 import coursesService from '../services/courses.service';
+import { preRegistrationService } from '../services/preregistration.service';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
@@ -267,6 +269,15 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   });
   const [viewProfileOpen, setViewProfileOpen] = useState(false);
   const [viewingProfile, setViewingProfile] = useState<any>(null);
+
+  // Pre-registration application queue state
+  const [preRegAdminQueue, setPreRegAdminQueue] = useState<any[]>([]);
+  const [loadingPreRegAdmin, setLoadingPreRegAdmin] = useState(false);
+  const [preRegCreateId, setPreRegCreateId] = useState<number | null>(null);
+  const [preRegCredentials, setPreRegCredentials] = useState({ username: '', password: '' });
+  const [preRegCreating, setPreRegCreating] = useState(false);
+  const [preRegCreatedCreds, setPreRegCreatedCreds] = useState<Record<number, { username: string; password: string; student_id: string }>>({}); 
+  const [preRegViewCredsId, setPreRegViewCredsId] = useState<number | null>(null);
 
   // Role label helpers: switch text between Faculty and Teacher based on active section
   const isFacultySection = activeSection === 'Manage Faculty';
@@ -615,6 +626,56 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       alert(error.message || 'Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Pre-registration admin queue
+  const loadPreRegAdminQueue = async () => {
+    try {
+      setLoadingPreRegAdmin(true);
+      const resp = await preRegistrationService.getAdminQueue();
+      setPreRegAdminQueue(resp?.data || []);
+    } catch (err) {
+      console.error('Failed loading pre-reg admin queue', err);
+    } finally {
+      setLoadingPreRegAdmin(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'Application Queue') {
+      loadPreRegAdminQueue();
+    }
+  }, [activeSection]);
+
+  const handleCreateAccountFromPreReg = async (id: number) => {
+    if (!preRegCredentials.username || !preRegCredentials.password) {
+      alert('Please enter both username and password.');
+      return;
+    }
+    if (preRegCredentials.password.length < 6) {
+      alert('Password must be at least 6 characters.');
+      return;
+    }
+    try {
+      setPreRegCreating(true);
+      const resp = await preRegistrationService.createAccount(id, {
+        username: preRegCredentials.username,
+        password: preRegCredentials.password,
+      });
+      if (resp.success) {
+        setPreRegCreatedCreds(prev => ({ ...prev, [id]: { username: preRegCredentials.username, password: preRegCredentials.password, student_id: resp.data.student_id } }));
+        alert(`Account created successfully!\n\nStudent ID: ${resp.data.student_id}\nUsername: ${preRegCredentials.username}\n\nPlease send these credentials to the student.`);
+        setPreRegCreateId(null);
+        setPreRegCredentials({ username: '', password: '' });
+        await loadPreRegAdminQueue();
+      } else {
+        alert(resp.message || 'Failed to create account.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to create account.');
+    } finally {
+      setPreRegCreating(false);
     }
   };
 
@@ -3065,6 +3126,150 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     );
   };
 
+  // ─── Application Queue (Pre-Registration) ───
+  const renderApplicationQueueContent = () => {
+    if (loadingPreRegAdmin) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /><span className="ml-3 text-slate-500">Loading queue...</span></div>;
+
+    const pending = preRegAdminQueue.filter((p: any) => p.status === 'In Admin Queue');
+    const created = preRegAdminQueue.filter((p: any) => p.status === 'Account Created');
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-600">{pending.length} verified applicant{pending.length !== 1 ? 's' : ''} awaiting account creation</p>
+          <Button variant="outline" size="sm" onClick={loadPreRegAdminQueue} className="gap-1"><RefreshCw className="h-4 w-4" /> Refresh</Button>
+        </div>
+
+        {pending.length === 0 && created.length === 0 && (
+          <Card className="p-12 text-center border-0 shadow-sm">
+            <CheckCircle className="h-12 w-12 text-green-400 mx-auto mb-3" />
+            <p className="text-slate-600">No applications in queue. All caught up!</p>
+          </Card>
+        )}
+
+        {pending.map((app: any) => (
+          <Card key={app.id} className="p-6 shadow-sm border-0">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-lg text-slate-900">{app.first_name} {app.middle_name ? app.middle_name + ' ' : ''}{app.last_name}{app.suffix ? ' ' + app.suffix : ''}</h3>
+                <p className="text-sm text-slate-500">{app.reference_id} · {app.email} · {app.contact_number}</p>
+              </div>
+              <Badge className="bg-indigo-100 text-indigo-800">In Admin Queue</Badge>
+            </div>
+            {/* Personal Information */}
+            <div className="mb-4 p-4 bg-slate-50 rounded-lg space-y-3">
+              <h4 className="font-semibold text-sm text-slate-700 flex items-center gap-2">
+                <User className="h-4 w-4" /> Personal Information
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+                <div><span className="text-slate-500">First Name:</span> <span className="font-medium">{app.first_name}</span></div>
+                <div><span className="text-slate-500">Middle Name:</span> <span className="font-medium">{app.middle_name || '—'}</span></div>
+                <div><span className="text-slate-500">Last Name:</span> <span className="font-medium">{app.last_name}</span></div>
+                {app.suffix && <div><span className="text-slate-500">Suffix:</span> <span className="font-medium">{app.suffix}</span></div>}
+                <div><span className="text-slate-500">Email:</span> <span className="font-medium">{app.email}</span></div>
+                <div><span className="text-slate-500">Contact:</span> <span className="font-medium">{app.contact_number}</span></div>
+                <div><span className="text-slate-500">Gender:</span> <span className="font-medium">{app.gender || '—'}</span></div>
+                <div><span className="text-slate-500">Birth Date:</span> <span className="font-medium">{app.birth_date || '—'}</span></div>
+                <div className="sm:col-span-2"><span className="text-slate-500">Address:</span> <span className="font-medium">{app.address || '—'}</span></div>
+              </div>
+            </div>
+
+            {/* Enrollment & Assessment Details */}
+            <div className="grid grid-cols-4 gap-4 text-sm mb-4">
+              <div><span className="text-slate-500">Course:</span> <span className="font-medium">{app.course}</span></div>
+              <div><span className="text-slate-500">Modality:</span> <span className="font-medium">{app.learning_modality}</span></div>
+              <div><span className="text-slate-500">Admission:</span> <span className="font-medium">{app.admission_type}</span></div>
+              <div><span className="text-slate-500">Payment Terms:</span> <span className="font-medium">{app.payment_terms}</span></div>
+              <div><span className="text-slate-500">Total:</span> <span className="font-bold text-blue-600">₱{Number(app.total_assessment).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
+              {app.cashier_remarks && <div className="col-span-3"><span className="text-slate-500">Cashier Remarks:</span> <span className="font-medium">{app.cashier_remarks}</span></div>}
+            </div>
+
+            {preRegCreateId === app.id ? (
+              <div className="border-t pt-4 space-y-3">
+                <h4 className="font-semibold text-sm text-slate-700">Create Student Account</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Username</Label>
+                    <Input value={preRegCredentials.username} onChange={(e) => setPreRegCredentials(p => ({ ...p, username: e.target.value }))} placeholder="Choose username" className="mt-1 text-sm" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Password (min 6 chars)</Label>
+                    <Input type="password" value={preRegCredentials.password} onChange={(e) => setPreRegCredentials(p => ({ ...p, password: e.target.value }))} placeholder="Set password" className="mt-1 text-sm" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => handleCreateAccountFromPreReg(app.id)} disabled={preRegCreating}
+                    style={{ background: '#16a34a', color: 'white' }} className="gap-1 flex-1">
+                    {preRegCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                    Create Account
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => { setPreRegCreateId(null); setPreRegCredentials({ username: '', password: '' }); }}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <Button size="sm" onClick={() => { setPreRegCreateId(app.id); setPreRegCredentials({ username: '', password: '' }); }}
+                style={{ background: '#2563eb', color: 'white' }} className="gap-1">
+                <UserPlus className="h-4 w-4" /> Create Account
+              </Button>
+            )}
+          </Card>
+        ))}
+
+        {created.length > 0 && (
+          <>
+            <h3 className="text-sm font-semibold text-slate-500 pt-4">Recently Created Accounts</h3>
+            {created.map((app: any) => (
+              <Card key={app.id} className="p-6 shadow-sm border-0 bg-green-50/50">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-slate-900">{app.first_name} {app.middle_name ? app.middle_name + ' ' : ''}{app.last_name}{app.suffix ? ' ' + app.suffix : ''}</h3>
+                    <p className="text-xs text-slate-500">{app.reference_id} · {app.email} · {app.contact_number}</p>
+                  </div>
+                  <Badge className="bg-green-100 text-green-800 text-xs">Account Created</Badge>
+                </div>
+
+                {/* Account Info */}
+                <div className="p-3 bg-green-100/60 rounded-lg text-sm space-y-2">
+                  <p className="text-green-800"><span className="font-medium">Account created on:</span> {new Date(app.account_created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+
+                  {preRegViewCredsId === app.id ? (
+                    <div className="mt-2 p-3 bg-white rounded-lg border border-green-200 space-y-1">
+                      <h4 className="font-semibold text-xs text-slate-700 uppercase tracking-wide mb-2">Account Credentials</h4>
+                      {preRegCreatedCreds[app.id] ? (
+                        <>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-500 w-24">Student ID:</span>
+                            <span className="font-mono font-semibold text-slate-900">{preRegCreatedCreds[app.id].student_id}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-500 w-24">Username:</span>
+                            <span className="font-mono font-semibold text-slate-900">{preRegCreatedCreds[app.id].username}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-500 w-24">Password:</span>
+                            <span className="font-mono font-semibold text-slate-900">{preRegCreatedCreds[app.id].password}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500 italic">Credentials were set in a previous session and the password cannot be retrieved. Check admin remarks below for the username.</p>
+                      )}
+                      {app.admin_remarks && <p className="text-green-700 text-xs mt-2 border-t pt-2">{app.admin_remarks}</p>}
+                      <Button size="sm" variant="outline" onClick={() => setPreRegViewCredsId(null)} className="mt-2 text-xs">Hide</Button>
+                    </div>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setPreRegViewCredsId(app.id)} className="mt-1 gap-1 text-xs">
+                      <Eye className="h-3 w-3" /> View Credentials
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="flex min-h-screen">
@@ -3130,6 +3335,18 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             >
               <Clock className="h-5 w-5" />
               Audit Trail
+            </button>
+
+            <button
+              onClick={() => setActiveSection('Application Queue')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                activeSection === 'Application Queue' 
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg' 
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <ClipboardList className="h-5 w-5" />
+              Application Queue
             </button>
 
             {/* Faculty moved into Manage submenu; no top-level Faculty button */}
@@ -3247,6 +3464,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   {activeSection === 'Installment Payments' && 'Installment Payments'}
                   {activeSection === 'Manage Forms' && 'Digital Forms Library'}
                   {activeSection === 'Student Documents' && 'Student Document Submissions'}
+                  {activeSection === 'Application Queue' && 'Application Queue'}
                 </h1>
                 <p className="text-sm text-slate-600">
                   {activeSection === 'Dashboard' && 'Welcome back to your administration portal'}
@@ -3266,6 +3484,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   {activeSection === 'Installment Payments' && 'Track installment payment submissions and verification'}
                   {activeSection === 'Manage Forms' && 'Upload and manage downloadable forms for students'}
                   {activeSection === 'Student Documents' && 'Review student document submissions and track submission status'}
+                  {activeSection === 'Application Queue' && 'Review verified pre-registration applicants and create student accounts'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -3295,6 +3514,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             {activeSection === 'School Year' && renderSchoolYearContent()}
             {activeSection === 'Manage Forms' && renderManageFormsContent()}
             {activeSection === 'Student Documents' && renderStudentDocumentsContent()}
+            {activeSection === 'Application Queue' && renderApplicationQueueContent()}
           </div>
         </div>
 

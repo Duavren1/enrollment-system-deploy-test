@@ -5,6 +5,7 @@ import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
 import { cashierService } from '../services/cashier.service';
+import { preRegistrationService } from '../services/preregistration.service';
 import { 
   Loader2, 
   LogOut, 
@@ -37,7 +38,7 @@ import React from 'react';
 const PesoIcon = (props: any) => (
   <span {...props} className={(props.className || '') + ' inline-flex items-center'}>₱</span>
 );
-import api from '../utils/api';
+import api, { API_SERVER_URL } from '../utils/api';
 
 interface CashierDashboardProps {
   onLogout: () => void;
@@ -81,6 +82,12 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
   const [penaltyFeeConfig, setPenaltyFeeConfig] = useState<number>(500);
   const [editingPenaltyFee, setEditingPenaltyFee] = useState(false);
   const [penaltyFeeInput, setPenaltyFeeInput] = useState('500');
+
+  // Pre-registration verification state
+  const [preRegQueue, setPreRegQueue] = useState<any[]>([]);
+  const [loadingPreReg, setLoadingPreReg] = useState(false);
+  const [preRegRemarks, setPreRegRemarks] = useState('');
+  const [preRegViewId, setPreRegViewId] = useState<number | null>(null);
 
   const loadFees = async () => {
     try {
@@ -242,6 +249,37 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
       loadFees();
     }
   }, [activeSection]);
+
+  // Load pre-registration queue
+  const loadPreRegQueue = async () => {
+    try {
+      setLoadingPreReg(true);
+      const resp = await preRegistrationService.getCashierQueue();
+      setPreRegQueue(resp?.data || []);
+    } catch (err) {
+      console.error('Failed loading pre-reg queue', err);
+    } finally {
+      setLoadingPreReg(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'Pre-Reg Verifications') {
+      loadPreRegQueue();
+    }
+  }, [activeSection]);
+
+  const handlePreRegVerify = async (id: number, action: 'verify' | 'reject') => {
+    if (!window.confirm(`Are you sure you want to ${action} this pre-registration payment?`)) return;
+    try {
+      await preRegistrationService.verifyPayment(id, { action, remarks: preRegRemarks });
+      setPreRegRemarks('');
+      setPreRegViewId(null);
+      await loadPreRegQueue();
+    } catch (err: any) {
+      alert(err.message || `Failed to ${action} payment.`);
+    }
+  };
 
   const handleProcess = async (txId: number, action: 'complete' | 'reject') => {
     const actionLabel = action === 'complete' ? 'approve' : 'reject';
@@ -1708,6 +1746,94 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
     );
   };
 
+  // ─── Pre-Registration Verifications Section ───
+  const renderPreRegVerificationsContent = () => {
+    if (loadingPreReg) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /><span className="ml-3 text-slate-500">Loading queue...</span></div>;
+
+    const submitted = preRegQueue.filter((p: any) => p.status === 'Payment Submitted');
+    const rejected = preRegQueue.filter((p: any) => p.status === 'Payment Rejected');
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-600">{submitted.length} payment{submitted.length !== 1 ? 's' : ''} awaiting verification</p>
+          <Button variant="outline" size="sm" onClick={loadPreRegQueue} className="gap-1"><Eye className="h-4 w-4" /> Refresh</Button>
+        </div>
+
+        {submitted.length === 0 && rejected.length === 0 && (
+          <Card className="p-12 text-center border-0 shadow-sm">
+            <CheckCircle className="h-12 w-12 text-green-400 mx-auto mb-3" />
+            <p className="text-slate-600">No pre-registration payments to verify right now.</p>
+          </Card>
+        )}
+
+        {submitted.map((app: any) => (
+          <Card key={app.id} className="p-6 shadow-sm border-0">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">{app.first_name} {app.last_name}</h3>
+                <p className="text-xs text-slate-500">{app.reference_id} · {app.email}</p>
+              </div>
+              <Badge className="bg-blue-100 text-blue-800">Payment Submitted</Badge>
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-sm mb-4">
+              <div><span className="text-slate-500">Course:</span> <span className="font-medium">{app.course}</span></div>
+              <div><span className="text-slate-500">Modality:</span> <span className="font-medium">{app.learning_modality}</span></div>
+              <div><span className="text-slate-500">Total:</span> <span className="font-bold text-blue-600">₱{Number(app.total_assessment).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
+            </div>
+            {app.receipt_file_name && (
+              <div className="mb-4 p-3 bg-slate-50 rounded-lg flex items-center gap-2">
+                <FileText className="h-4 w-4 text-slate-500" />
+                <span className="text-sm">{app.receipt_file_name}</span>
+                {app.receipt_file_path && (
+                  <a href={`${API_SERVER_URL}/uploads/receipts/${app.receipt_file_path.split(/[\\/]/).pop()}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-blue-600 hover:underline">
+                    View Receipt
+                  </a>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-3 border-t pt-4">
+              <Label className="text-sm">Remarks (optional)</Label>
+              <Input
+                value={preRegViewId === app.id ? preRegRemarks : ''}
+                onChange={(e) => { setPreRegViewId(app.id); setPreRegRemarks(e.target.value); }}
+                onFocus={() => setPreRegViewId(app.id)}
+                placeholder="Add cashier remarks..."
+                className="text-sm"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => { setPreRegViewId(app.id); handlePreRegVerify(app.id, 'verify'); }} style={{ background: 'linear-gradient(to right, #16a34a, #059669)', color: 'white' }} className="gap-1 flex-1">
+                  <CheckCircle className="h-4 w-4" /> Verify Payment
+                </Button>
+                <Button size="sm" variant="destructive" onClick={() => { setPreRegViewId(app.id); handlePreRegVerify(app.id, 'reject'); }} className="gap-1 flex-1">
+                  <XCircle className="h-4 w-4" /> Reject
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+
+        {rejected.length > 0 && (
+          <>
+            <h3 className="text-sm font-semibold text-slate-500 pt-4">Previously Rejected</h3>
+            {rejected.map((app: any) => (
+              <Card key={app.id} className="p-4 shadow-sm border-0 bg-red-50/50">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-medium text-sm">{app.first_name} {app.last_name} — {app.reference_id}</p>
+                    <p className="text-xs text-red-600 mt-0.5">Rejected: {app.cashier_remarks || 'No remarks'}</p>
+                  </div>
+                  <Badge className="bg-red-100 text-red-800 text-xs">Rejected</Badge>
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="flex min-h-screen">
@@ -1798,6 +1924,18 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
               <FileText className="h-5 w-5" />
               Transaction Logs
             </button>
+
+            <button
+              onClick={() => setActiveSection('Pre-Reg Verifications')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                activeSection === 'Pre-Reg Verifications' 
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg' 
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <ClipboardList className="h-5 w-5" />
+              Pre-Reg Verifications
+            </button>
           </nav>
 
           <div className="p-4 border-t border-slate-200">
@@ -1825,6 +1963,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                   {activeSection === 'Pending Verifications' && 'Payment Verifications'}
                   {activeSection === 'Fee Management' && 'Fee Management'}
                   {activeSection === 'Transaction Logs' && 'Transaction Logs'}
+                  {activeSection === 'Pre-Reg Verifications' && 'Pre-Registration Verifications'}
                 </h1>
                 <p className="text-sm text-slate-600">
                   {activeSection === 'Dashboard' && 'Payment processing and transaction management'}
@@ -1833,6 +1972,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                   {activeSection === 'Pending Verifications' && 'Verify and process pending student payments'}
                   {activeSection === 'Fee Management' && 'Configure and manage course fees'}
                   {activeSection === 'Transaction Logs' && 'View all financial transactions and history'}
+                  {activeSection === 'Pre-Reg Verifications' && 'Verify payment receipts for pre-registration applicants'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -1862,6 +2002,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
             {activeSection === 'Pending Verifications' && renderPendingVerificationsContent()}
             {activeSection === 'Fee Management' && renderFeeManagementContent()}
             {activeSection === 'Transaction Logs' && renderTransactionsContent()}
+            {activeSection === 'Pre-Reg Verifications' && renderPreRegVerificationsContent()}
           </div>
       </div>
 

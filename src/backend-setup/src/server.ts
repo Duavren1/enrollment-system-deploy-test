@@ -28,6 +28,7 @@ import cashierRoutes from './routes/cashier.routes';
 import reportsRoutes from './routes/reports.routes';
 import scholarshipRoutes from './routes/scholarship.routes';
 import requirementsRoutes from './routes/requirements.routes';
+import preregistrationRoutes from './routes/preregistration.routes';
 
 // Load environment variables
 dotenv.config();
@@ -94,6 +95,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/scholarships', scholarshipRoutes);
 app.use('/api/requirements', requirementsRoutes);
 app.use('/api/requirements', requirementsRoutes);
+app.use('/api/pre-registration', preregistrationRoutes);
 
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {

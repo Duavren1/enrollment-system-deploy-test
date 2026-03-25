@@ -135,8 +135,6 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   const [reqActiveTab, setReqActiveTab] = useState('initial');
   const [uploadingReq, setUploadingReq] = useState<string | null>(null);
   const [incForm, setIncForm] = useState({ requirement_name: '' });
-  const [ovrForm, setOvrForm] = useState({ school_year: '', semester: '', requested_units: '', reason: '' });
-  const [submittingOvr, setSubmittingOvr] = useState(false);;
 
   const SCHOLAR_TYPES = [
     'None',
@@ -287,9 +285,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       if (activeSection !== 'Grades') return;
       try {
         setLoadingGrades(true);
-        const sid = studentProfile?.student_id;
-        if (!sid) return;
-        const resp = await gradesService.getStudentGrades(sid.toString());
+        const resp = await gradesService.getMyGrades();
         if (!mounted) return;
         setGrades(resp?.data || resp || []);
       } catch (err) {
@@ -301,7 +297,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     };
     loadGrades();
     return () => { mounted = false; };
-  }, [activeSection, studentProfile]);
+  }, [activeSection]);
 
   // Fetch curriculum checklist
   useEffect(() => {
@@ -3574,24 +3570,6 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     }
   };
 
-  const handleSubmitOvr = async () => {
-    try {
-      setSubmittingOvr(true);
-      await studentService.submitOvr({
-        school_year: ovrForm.school_year,
-        semester: ovrForm.semester,
-        requested_units: Number(ovrForm.requested_units),
-        reason: ovrForm.reason,
-      });
-      setOvrForm({ school_year: '', semester: '', requested_units: '', reason: '' });
-      await refreshRequirements();
-    } catch (err) {
-      console.error('OVR submit failed:', err);
-    } finally {
-      setSubmittingOvr(false);
-    }
-  };
-
   const getStatusBadge = (status: string) => {
     const map: Record<string, { color: string; icon: any }> = {
       Pending: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <Clock className="h-3 w-3" /> },
@@ -3630,13 +3608,12 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       );
     }
 
-    const { initialRequirements, incRequirements, ovrRequests } = requirementsData;
+    const { initialRequirements, incRequirements } = requirementsData;
 
     const tabs = [
       { key: 'initial', label: 'Initial Requirements', count: initialRequirements?.length || 0 },
       { key: 'inc', label: 'INC Requirements', count: incRequirements?.length || 0 },
       { key: 'hardcopy', label: 'Hard Copy', count: initialRequirements?.filter((r: any) => r.uploaded)?.length || 0 },
-      { key: 'ovr', label: 'OVR Request', count: ovrRequests?.length || 0 },
     ];
 
     return (
@@ -3822,69 +3799,6 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
           </Card>
         )}
 
-        {/* ── Tab: OVR Request ── */}
-        {reqActiveTab === 'ovr' && (
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-1">Request for OVR (Overload)</h3>
-            <p className="text-sm text-slate-500 mb-4">Submit a request to take additional units beyond the normal load.</p>
-
-            {/* OVR Form */}
-            <div className="p-4 bg-violet-50 rounded-xl border border-violet-200 mb-4 space-y-3">
-              <p className="text-sm font-medium text-violet-800">New OVR Request</p>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label className="text-xs">School Year</Label>
-                  <Input placeholder="e.g. 2024-2025" value={ovrForm.school_year} onChange={(e) => setOvrForm(p => ({ ...p, school_year: e.target.value }))} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs">Semester</Label>
-                  <Input placeholder="e.g. 1st" value={ovrForm.semester} onChange={(e) => setOvrForm(p => ({ ...p, semester: e.target.value }))} className="mt-1" />
-                </div>
-                <div>
-                  <Label className="text-xs">Requested Units</Label>
-                  <Input type="number" placeholder="e.g. 27" value={ovrForm.requested_units} onChange={(e) => setOvrForm(p => ({ ...p, requested_units: e.target.value }))} className="mt-1" />
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs">Reason / Justification</Label>
-                <textarea
-                  className="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  placeholder="Explain why you need to take additional units..."
-                  value={ovrForm.reason}
-                  onChange={(e) => setOvrForm(p => ({ ...p, reason: e.target.value }))}
-                />
-              </div>
-              <Button
-                onClick={handleSubmitOvr}
-                disabled={!ovrForm.requested_units || !ovrForm.reason || submittingOvr}
-                className="bg-violet-600 hover:bg-violet-700"
-              >
-                {submittingOvr ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
-                Submit OVR Request
-              </Button>
-            </div>
-
-            {/* OVR List */}
-            <div className="space-y-3">
-              {ovrRequests?.map((req: any) => (
-                <div key={req.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="font-medium text-sm">OVR — {req.school_year} / {req.semester}</p>
-                    {getStatusBadge(req.status)}
-                  </div>
-                  <div className="text-xs text-slate-500 space-y-0.5">
-                    <p>Requested Units: {req.requested_units}</p>
-                    <p>Reason: {req.reason}</p>
-                    {req.registrar_remarks && <p className="text-orange-600">Registrar: {req.registrar_remarks}</p>}
-                  </div>
-                </div>
-              ))}
-              {(!ovrRequests || ovrRequests.length === 0) && (
-                <p className="text-sm text-slate-500 text-center py-4">No OVR requests submitted yet.</p>
-              )}
-            </div>
-          </Card>
-        )}
       </div>
     );
   };
@@ -4060,7 +3974,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                   {activeSection === 'Tuition and Fees' && 'Track your tuition payments and balance'}
                   {activeSection === 'Grades' && 'Review your academic grades and performance'}
                   {activeSection === 'Curriculum Checklist' && 'View your program curriculum and track your academic progress'}
-                  {activeSection === 'Requirements' && 'Submit and track your enrollment requirements, crediting, and OVR requests'}
+                  {activeSection === 'Requirements' && 'Submit and track your enrollment requirements and crediting requests'}
                   {activeSection === 'My Profile' && 'Update your personal information and account settings'}
                 </p>
               </div>

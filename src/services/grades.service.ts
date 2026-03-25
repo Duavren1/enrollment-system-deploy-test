@@ -23,6 +23,19 @@ class GradesService {
     }
   }
 
+  async getMyGrades(filters?: {
+    school_year?: string;
+    semester?: string;
+    subject_type?: 'SHS' | 'College';
+  }): Promise<any> {
+    try {
+      const response = await api.get('/grades/my-grades', { params: filters });
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
   async updateGrade(enrollmentSubjectId: number, grade: string): Promise<any> {
     try {
       const response = await api.put(`/grades/${enrollmentSubjectId}`, { grade });

@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getStudentGrades,
+  getMyGrades,
   updateGrade,
   bulkUpdateGrades,
   getGradesBySection,
@@ -13,6 +14,8 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
+// Student fetches own grades (secure — derives student from JWT)
+router.get('/my-grades', authenticate, authorize('student'), getMyGrades);
 router.get('/student/:studentId', authenticate, authorize('admin', 'superadmin', 'registrar', 'dean'), getStudentGrades);
 router.put('/:id', authenticate, authorize('admin', 'superadmin', 'registrar'), updateGrade);
 router.post('/bulk', authenticate, authorize('admin', 'superadmin', 'registrar'), bulkUpdateGrades);

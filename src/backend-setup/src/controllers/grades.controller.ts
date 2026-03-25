@@ -57,6 +57,61 @@ export const getStudentGrades = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Get grades for the currently logged-in student (secure — uses JWT user id)
+export const getMyGrades = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { school_year, semester, subject_type } = req.query;
+
+    let sql = `
+      SELECT 
+        es.*,
+        s.subject_code,
+        s.subject_name,
+        s.units,
+        s.subject_type,
+        e.school_year,
+        e.semester,
+        st.student_id,
+        st.first_name || ' ' || st.last_name as student_name
+      FROM enrollment_subjects es
+      JOIN enrollments e ON es.enrollment_id = e.id
+      JOIN subjects s ON es.subject_id = s.id
+      JOIN students st ON e.student_id = st.id
+      WHERE st.user_id = ?
+    `;
+    const params: any[] = [userId];
+
+    if (school_year) {
+      sql += ' AND e.school_year = ?';
+      params.push(school_year);
+    }
+    if (semester) {
+      sql += ' AND e.semester = ?';
+      params.push(semester);
+    }
+    if (subject_type) {
+      sql += ' AND s.subject_type = ?';
+      params.push(subject_type);
+    }
+
+    sql += ' ORDER BY e.school_year DESC, e.semester, s.subject_code';
+
+    const grades = await query(sql, params);
+
+    res.json({
+      success: true,
+      data: grades
+    });
+  } catch (error) {
+    console.error('Get my grades error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
 // Update grade for a specific enrollment subject
 export const updateGrade = async (req: AuthRequest, res: Response) => {
   try {

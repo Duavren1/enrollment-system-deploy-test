@@ -822,6 +822,74 @@ async function setupDatabase() {
       console.log('⚠️ subject_type column may already exist');
     }
 
+    // ── Pre-Registration Workflow Table ──
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pre_registrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference_id TEXT UNIQUE NOT NULL,
+
+        -- Phase 1: Initial Information
+        first_name TEXT NOT NULL,
+        middle_name TEXT,
+        last_name TEXT NOT NULL,
+        suffix TEXT,
+        email TEXT NOT NULL,
+        contact_number TEXT NOT NULL,
+        birth_date TEXT,
+        gender TEXT,
+        address TEXT,
+        admission_type TEXT NOT NULL DEFAULT 'New',
+        source_of_awareness TEXT,
+
+        -- Phase 1: Learning Options
+        learning_modality TEXT NOT NULL DEFAULT 'Face-to-Face',
+        course TEXT NOT NULL,
+        payment_terms TEXT NOT NULL DEFAULT 'Full',
+
+        -- Phase 1: Assessment
+        tuition_per_unit REAL DEFAULT 0,
+        total_units INTEGER DEFAULT 0,
+        tuition_fee REAL DEFAULT 0,
+        registration_fee REAL DEFAULT 0,
+        library_fee REAL DEFAULT 0,
+        lab_fee REAL DEFAULT 0,
+        id_fee REAL DEFAULT 0,
+        others_fee REAL DEFAULT 0,
+        total_assessment REAL DEFAULT 0,
+
+        -- Phase 2: Payment
+        receipt_file_path TEXT,
+        receipt_file_name TEXT,
+
+        -- Workflow status
+        status TEXT NOT NULL DEFAULT 'Pending Payment'
+          CHECK(status IN (
+            'Pending Payment',
+            'Payment Submitted',
+            'Payment Verified',
+            'Payment Rejected',
+            'In Admin Queue',
+            'Account Created',
+            'Rejected'
+          )),
+        cashier_remarks TEXT,
+        admin_remarks TEXT,
+        verified_by INTEGER,
+        verified_at TEXT,
+        created_by_admin INTEGER,
+        account_created_at TEXT,
+
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (verified_by) REFERENCES users(id),
+        FOREIGN KEY (created_by_admin) REFERENCES users(id)
+      )
+    `);
+    console.log('✅ pre_registrations table created');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prereg_reference ON pre_registrations(reference_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prereg_status ON pre_registrations(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prereg_email ON pre_registrations(email)');
+
     // ── Requirements Workflow Tables ──
 
     // student_requirements: tracks individual requirement submissions per student

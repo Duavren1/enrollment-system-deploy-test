@@ -6,12 +6,13 @@ import SuperadminDashboard from './components/SuperadminDashboard';
 import DeanDashboard from './components/DeanDashboard';
 import RegistrarDashboard from './components/RegistrarDashboard';
 import CashierDashboard from './components/CashierDashboard';
+import PreRegistrationPage from './components/PreRegistrationPage';
 import { authService } from './services/auth.service';
 
 export type UserRole = 'student' | 'admin' | 'superadmin' | 'dean' | 'registrar' | 'cashier';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'login' | UserRole>('login');
+  const [currentView, setCurrentView] = useState<'login' | 'preregister' | UserRole>('login');
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -56,7 +57,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {currentView === 'login' && <LoginPage onLogin={handleLogin} />}
+      {currentView === 'login' && <LoginPage onLogin={handleLogin} onPreRegister={() => setCurrentView('preregister')} />}
+      {currentView === 'preregister' && <PreRegistrationPage onBack={() => setCurrentView('login')} />}
       {currentView === 'superadmin' && <SuperadminDashboard onLogout={handleLogout} />}
       {currentView === 'dean' && <DeanDashboard onLogout={handleLogout} />}
       {currentView === 'registrar' && <RegistrarDashboard onLogout={handleLogout} />}
