@@ -15,6 +15,8 @@ import {
   Eye,
   Edit,
   CheckCircle,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   AlertCircle,
   Plus,
@@ -169,6 +171,8 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
   const [reqLoading, setReqLoading] = useState(false);
   const [reqTab, setReqTab] = useState('requirements');
   const [reqReviewRemarks, setReqReviewRemarks] = useState('');
+  const [expandedHcStudents, setExpandedHcStudents] = useState<Set<string>>(new Set());
+  const [expandedDocStudents, setExpandedDocStudents] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchData();
@@ -2093,7 +2097,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
     }
   };
 
-  const handleReqStatusUpdate = async (id: number, status: string) => {
+  const handleReqStatusUpdate = async (id: number | string, status: string) => {
     try {
       await registrarService.updateRequirementStatus(id, { status, remarks: reqReviewRemarks });
       setReqReviewRemarks('');
@@ -2103,7 +2107,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
     }
   };
 
-  const handleHardCopyConfirm = async (id: number) => {
+  const handleHardCopyConfirm = async (id: number | string) => {
     try {
       await registrarService.confirmHardCopyReceipt(id);
       await refreshReqData();
@@ -2125,6 +2129,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
     const map: Record<string, string> = {
       Pending: 'bg-amber-100 text-amber-700 border-amber-200',
       Submitted: 'bg-blue-100 text-blue-700 border-blue-200',
+      Received: 'bg-cyan-100 text-cyan-700 border-cyan-200',
       Verified: 'bg-green-100 text-green-700 border-green-200',
       Rejected: 'bg-red-100 text-red-700 border-red-200',
       Incomplete: 'bg-orange-100 text-orange-700 border-orange-200',
@@ -2146,9 +2151,10 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
       );
     }
 
+    const hardCopyList = reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1);
     const reqTabs = [
       { key: 'requirements', label: 'Document Requirements', count: reqReviewList.length },
-      { key: 'hardcopy', label: 'Hard Copy Tracking', count: reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1 && !r.hard_copy_received_at).length },
+      { key: 'hardcopy', label: 'Hard Copy Tracking', count: hardCopyList.filter((r: any) => !r.hard_copy_received_at).length },
     ];
 
     return (
@@ -2176,93 +2182,261 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
         </div>
 
         {/* ── Document Requirements Review ── */}
-        {reqTab === 'requirements' && (
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold">Document Requirements</h3>
-                <p className="text-sm text-slate-500">Review and verify student-submitted documents.</p>
+        {reqTab === 'requirements' && (() => {
+          // Group requirements by student name
+          const docGrouped: Record<string, { studentName: string; studentNumber: string; course: string; studentType: string; requirements: any[] }> = {};
+          reqReviewList.forEach((req: any) => {
+            const key = `${req.first_name} ${req.last_name}`;
+            if (!docGrouped[key]) {
+              docGrouped[key] = {
+                studentName: key,
+                studentNumber: req.student_number || '',
+                course: req.course || '',
+                studentType: req.student_type || '',
+                requirements: [],
+              };
+            }
+            docGrouped[key].requirements.push(req);
+          });
+          const docGroups = Object.values(docGrouped);
+
+          const toggleDocStudent = (name: string) => {
+            setExpandedDocStudents(prev => {
+              const next = new Set(prev);
+              if (next.has(name)) next.delete(name); else next.add(name);
+              return next;
+            });
+          };
+
+          return (
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Document Requirements</h3>
+                  <p className="text-sm text-slate-500">Review and verify student-submitted documents. Click a student to view their requirements.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (expandedDocStudents.size === docGroups.length) {
+                      setExpandedDocStudents(new Set());
+                    } else {
+                      setExpandedDocStudents(new Set(docGroups.map(g => g.studentName)));
+                    }
+                  }}>
+                    {expandedDocStudents.size === docGroups.length ? 'Collapse All' : 'Expand All'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={refreshReqData}>Refresh</Button>
+                </div>
               </div>
-              <Button variant="outline" size="sm" onClick={refreshReqData}>Refresh</Button>
-            </div>
-            {reqReviewList.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-8">No submitted requirements to review.</p>
-            ) : (
-              <div className="space-y-3">
-                {reqReviewList.map((req: any) => (
-                  <div key={req.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-medium text-sm">{req.first_name} {req.last_name} <span className="text-slate-400 font-normal">({req.student_number})</span></p>
-                        <p className="text-xs text-slate-500">{req.course} · {req.student_type} · {req.requirement_type}</p>
+              {docGroups.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8">No submitted requirements to review.</p>
+              ) : (
+                <div className="space-y-3">
+                  {docGroups.map((group) => {
+                    const isExpanded = expandedDocStudents.has(group.studentName);
+                    const verifiedCount = group.requirements.filter((r: any) => r.status === 'Verified').length;
+                    const totalCount = group.requirements.length;
+                    const hasActionNeeded = group.requirements.some((r: any) => r.status === 'Submitted' || r.status === 'Received');
+
+                    return (
+                      <div key={group.studentName} className="rounded-xl border border-slate-200 overflow-hidden">
+                        {/* Student Header */}
+                        <button
+                          onClick={() => toggleDocStudent(group.studentName)}
+                          className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50 transition-colors text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            {isExpanded
+                              ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                              : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                            }
+                            <div>
+                              <p className="font-semibold text-sm text-slate-900">{group.studentName} <span className="text-slate-400 font-normal">({group.studentNumber})</span></p>
+                              <p className="text-xs text-slate-500">{group.course} · {group.studentType}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">{verifiedCount}/{totalCount} verified</span>
+                            {hasActionNeeded
+                              ? <Badge className="bg-amber-100 text-amber-700 border border-amber-200">Action Needed</Badge>
+                              : verifiedCount === totalCount
+                                ? <Badge className="bg-green-100 text-green-700 border border-green-200">All Verified</Badge>
+                                : <Badge className="bg-slate-100 text-slate-600 border border-slate-200">Pending</Badge>
+                            }
+                          </div>
+                        </button>
+
+                        {/* Requirements List */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-200 divide-y divide-slate-100">
+                            {group.requirements.map((req: any) => (
+                              <div key={req.id} className="px-4 py-3 bg-slate-50">
+                                <div className="flex items-center justify-between pl-7">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-medium text-slate-800">{req.requirement_name}</p>
+                                      {reqStatusBadge(req.status)}
+                                    </div>
+                                    {req.file_name && <p className="text-xs text-slate-400 mt-0.5">File: {req.file_name}</p>}
+                                    {req.remarks && <p className="text-xs text-slate-500 mt-0.5">Remarks: {req.remarks}</p>}
+                                  </div>
+                                  <div className="shrink-0">
+                                    {req.status === 'Submitted' && (
+                                      <div className="flex items-center gap-2">
+                                        <Button size="sm" className="h-8 text-xs text-white" style={{ backgroundColor: '#0891b2' }} onClick={() => handleReqStatusUpdate(req.id, 'Received')}>
+                                          <CheckCircle className="h-3.5 w-3.5 mr-1" /> Receive
+                                        </Button>
+                                        <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Rejected')}>Reject</Button>
+                                      </div>
+                                    )}
+                                    {req.status === 'Received' && (
+                                      <div className="flex items-center gap-2">
+                                        <Input
+                                          placeholder="Remarks"
+                                          className="h-8 text-xs w-32"
+                                          value={reqReviewRemarks}
+                                          onChange={(e) => setReqReviewRemarks(e.target.value)}
+                                        />
+                                        <Button size="sm" className="h-8 text-xs text-white" style={{ backgroundColor: '#16a34a' }} onClick={() => handleReqStatusUpdate(req.id, 'Verified')}>Verify</Button>
+                                        <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Rejected')}>Reject</Button>
+                                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Incomplete')}>Mark INC</Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {reqStatusBadge(req.status)}
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-slate-700">{req.requirement_name}</p>
-                        {req.file_name && <p className="text-xs text-slate-400">File: {req.file_name}</p>}
-                      </div>
-                      {req.status === 'Submitted' && (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            placeholder="Remarks (optional)"
-                            className="h-8 text-xs w-40"
-                            value={reqReviewRemarks}
-                            onChange={(e) => setReqReviewRemarks(e.target.value)}
-                          />
-                          <Button size="sm" className="bg-green-600 hover:bg-green-700 h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Verified')}>Verify</Button>
-                          <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Rejected')}>Reject</Button>
-                          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => handleReqStatusUpdate(req.id, 'Incomplete')}>Mark INC</Button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
 
         {/* ── Hard Copy Tracking ── */}
-        {reqTab === 'hardcopy' && (
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold">Hard Copy Tracking</h3>
-                <p className="text-sm text-slate-500">Confirm receipt of physical documents from students.</p>
+        {reqTab === 'hardcopy' && (() => {
+          // Only show requirements the student has explicitly tagged as hard copy submitted
+          const hcFiltered = reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1);
+          const grouped: Record<string, { studentName: string; studentNumber: string; course: string; studentType: string; requirements: any[] }> = {};
+          hcFiltered.forEach((req: any) => {
+            const key = `${req.first_name} ${req.last_name}`;
+            if (!grouped[key]) {
+              grouped[key] = {
+                studentName: key,
+                studentNumber: req.student_number || '',
+                course: req.course || '',
+                studentType: req.student_type || '',
+                requirements: [],
+              };
+            }
+            grouped[key].requirements.push(req);
+          });
+          const studentGroups = Object.values(grouped);
+
+          const toggleStudent = (name: string) => {
+            setExpandedHcStudents(prev => {
+              const next = new Set(prev);
+              if (next.has(name)) next.delete(name); else next.add(name);
+              return next;
+            });
+          };
+
+          return (
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Hard Copy Tracking</h3>
+                  <p className="text-sm text-slate-500">Confirm receipt of physical documents from students. Click a student to view their requirements.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (expandedHcStudents.size === studentGroups.length) {
+                      setExpandedHcStudents(new Set());
+                    } else {
+                      setExpandedHcStudents(new Set(studentGroups.map(g => g.studentName)));
+                    }
+                  }}>
+                    {expandedHcStudents.size === studentGroups.length ? 'Collapse All' : 'Expand All'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={refreshReqData}>Refresh</Button>
+                </div>
               </div>
-              <Button variant="outline" size="sm" onClick={refreshReqData}>Refresh</Button>
-            </div>
-            {reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1).length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-8">No hard copies tagged for submission yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {reqReviewList.filter((r: any) => Number(r.hard_copy_submitted) === 1).map((req: any) => (
-                  <div key={req.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div>
-                      <p className="font-medium text-sm">{req.first_name} {req.last_name} — {req.requirement_name}</p>
-                      <p className="text-xs text-slate-500">
-                        {req.hard_copy_received_at
-                          ? <span className="text-green-600">Received on {new Date(req.hard_copy_received_at).toLocaleDateString()}</span>
-                          : <span className="text-amber-600">Student tagged as submitted — awaiting your confirmation</span>
-                        }
-                      </p>
-                    </div>
-                    {!req.hard_copy_received_at && (
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleHardCopyConfirm(req.id)}>
-                        <CheckCircle className="h-4 w-4 mr-1" /> Confirm Receipt
-                      </Button>
-                    )}
-                    {req.hard_copy_received_at && (
-                      <Badge className="bg-green-100 text-green-700 border border-green-200">Received</Badge>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
+              {studentGroups.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-8">No students have tagged hard copies for submission yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {studentGroups.map((group) => {
+                    const isExpanded = expandedHcStudents.has(group.studentName);
+                    const receivedCount = group.requirements.filter((r: any) => r.hard_copy_received_at).length;
+                    const totalCount = group.requirements.length;
+                    const allReceived = receivedCount === totalCount;
+
+                    return (
+                      <div key={group.studentName} className="rounded-xl border border-slate-200 overflow-hidden">
+                        {/* Student Header - clickable */}
+                        <button
+                          onClick={() => toggleStudent(group.studentName)}
+                          className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50 transition-colors text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            {isExpanded
+                              ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
+                              : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                            }
+                            <div>
+                              <p className="font-semibold text-sm text-slate-900">{group.studentName}</p>
+                              <p className="text-xs text-slate-500">{group.studentNumber} · {group.course} · {group.studentType}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">{receivedCount}/{totalCount} received</span>
+                            {allReceived
+                              ? <Badge className="bg-green-100 text-green-700 border border-green-200">Complete</Badge>
+                              : <Badge className="bg-amber-100 text-amber-700 border border-amber-200">Pending</Badge>
+                            }
+                          </div>
+                        </button>
+
+                        {/* Requirements List - expandable */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-200 divide-y divide-slate-100">
+                            {group.requirements.map((req: any) => (
+                              <div key={req.id} className="flex items-center justify-between px-4 py-3 bg-slate-50">
+                                <div className="pl-7">
+                                  <p className="text-sm font-medium text-slate-800">{req.requirement_name}</p>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    {req.hard_copy_received_at
+                                      ? <span className="text-green-600">Received on {new Date(req.hard_copy_received_at).toLocaleDateString()}</span>
+                                      : Number(req.hard_copy_submitted) === 1
+                                        ? <span className="text-amber-600">Student tagged as submitted — awaiting confirmation</span>
+                                        : <span className="text-slate-500">Hard copy not yet received</span>
+                                    }
+                                  </p>
+                                  {req.file_name && <p className="text-xs text-slate-400 mt-0.5">File: {req.file_name}</p>}
+                                </div>
+                                {!req.hard_copy_received_at ? (
+                                  <Button size="sm" className="text-white shrink-0" style={{ backgroundColor: '#16a34a' }} onClick={() => handleHardCopyConfirm(req.id)}>
+                                    <CheckCircle className="h-4 w-4 mr-1" /> Receive
+                                  </Button>
+                                ) : (
+                                  <Badge className="bg-green-100 text-green-700 border border-green-200 shrink-0">Received</Badge>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
 
 
 

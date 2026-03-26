@@ -899,7 +899,7 @@ async function setupDatabase() {
         student_id INTEGER NOT NULL,
         requirement_name TEXT NOT NULL,
         requirement_type TEXT NOT NULL CHECK(requirement_type IN ('Initial', 'INC')),
-        status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Submitted', 'Verified', 'Rejected', 'Incomplete')),
+        status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Submitted', 'Received', 'Verified', 'Rejected', 'Incomplete')),
         file_path TEXT,
         file_name TEXT,
         hard_copy_submitted INTEGER DEFAULT 0,
@@ -913,7 +913,40 @@ async function setupDatabase() {
         FOREIGN KEY (reviewed_by) REFERENCES users(id)
       )
     `);
-    console.log('✅ student_requirements table created');
+
+    // Migrate existing table if CHECK constraint doesn't include 'Received'
+    try {
+      db.exec(`UPDATE student_requirements SET status = 'Received' WHERE 0`);
+    } catch (e: any) {
+      if (e.code === 'SQLITE_CONSTRAINT_CHECK' || e.message?.includes('CHECK')) {
+        console.log('⏳ Migrating student_requirements table to add Received status...');
+        db.exec(`
+          CREATE TABLE student_requirements_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            requirement_name TEXT NOT NULL,
+            requirement_type TEXT NOT NULL CHECK(requirement_type IN ('Initial', 'INC')),
+            status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Submitted', 'Received', 'Verified', 'Rejected', 'Incomplete')),
+            file_path TEXT,
+            file_name TEXT,
+            hard_copy_submitted INTEGER DEFAULT 0,
+            hard_copy_received_at TEXT,
+            remarks TEXT,
+            reviewed_by INTEGER,
+            reviewed_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id)
+          );
+          INSERT INTO student_requirements_new SELECT * FROM student_requirements;
+          DROP TABLE student_requirements;
+          ALTER TABLE student_requirements_new RENAME TO student_requirements;
+        `);
+        console.log('✅ student_requirements table migrated successfully');
+      }
+    }
+    console.log('✅ student_requirements table ready');
 
     // ovr_requests: tracks overload / OVR requests
     db.exec(`

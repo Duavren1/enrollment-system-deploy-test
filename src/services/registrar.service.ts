@@ -263,7 +263,7 @@ class RegistrarService {
     }
   }
 
-  async updateRequirementStatus(id: number, data: { status: string; remarks?: string }): Promise<any> {
+  async updateRequirementStatus(id: number | string, data: { status: string; remarks?: string }): Promise<any> {
     try {
       const response = await api.put(`/requirements/registrar/${id}/status`, data);
       return response.data;
@@ -272,7 +272,7 @@ class RegistrarService {
     }
   }
 
-  async confirmHardCopyReceipt(id: number): Promise<any> {
+  async confirmHardCopyReceipt(id: number | string): Promise<any> {
     try {
       const response = await api.put(`/requirements/registrar/${id}/hard-copy-confirm`);
       return response.data;

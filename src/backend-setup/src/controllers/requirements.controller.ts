@@ -203,6 +203,8 @@ export const submitOvrRequest = async (req: Request, res: Response) => {
 export const getRequirementsForReview = async (req: Request, res: Response) => {
   try {
     const { status, type } = req.query;
+
+    // 1. Get uploaded requirement records from student_requirements table
     let sql = `
       SELECT sr.*, s.student_id as student_number, s.first_name, s.last_name, s.student_type, s.course
       FROM student_requirements sr
@@ -220,7 +222,85 @@ export const getRequirementsForReview = async (req: Request, res: Response) => {
     }
     sql += ' ORDER BY sr.created_at DESC';
 
-    const requirements = await query(sql, params);
+    const uploadedRequirements: any[] = await query(sql, params);
+
+    // 2. Also build initial requirements from students table so registrar can
+    //    receive hard copies even if no digital upload exists yet.
+    const students: any[] = await query(
+      `SELECT id, student_id as student_number, first_name, last_name, student_type, course,
+              form137_status, form138_status, tor_status, certificate_transfer_status,
+              birth_certificate_status, moral_certificate_status
+       FROM students
+       ORDER BY last_name, first_name`
+    );
+
+    // Map of requirement_name -> db_field for quick lookup
+    const reqByType: Record<string, { name: string; field: string }[]> = {
+      new: [
+        { name: 'Form 137', field: 'form137_status' },
+        { name: 'Form 138', field: 'form138_status' },
+        { name: 'Birth Certificate', field: 'birth_certificate_status' },
+        { name: 'Certificate of Good Moral', field: 'moral_certificate_status' },
+      ],
+      transferee: [
+        { name: 'Transcript of Records (TOR)', field: 'tor_status' },
+        { name: 'Certificate of Transfer', field: 'certificate_transfer_status' },
+        { name: 'Birth Certificate', field: 'birth_certificate_status' },
+        { name: 'Certificate of Good Moral', field: 'moral_certificate_status' },
+      ],
+      returning: [
+        { name: 'Form 137', field: 'form137_status' },
+        { name: 'Birth Certificate', field: 'birth_certificate_status' },
+        { name: 'Certificate of Good Moral', field: 'moral_certificate_status' },
+      ],
+      continuing: [
+        { name: 'Birth Certificate', field: 'birth_certificate_status' },
+        { name: 'Certificate of Good Moral', field: 'moral_certificate_status' },
+      ],
+    };
+
+    // Build a set of (student_id, requirement_name) already in uploaded list
+    const uploadedKeys = new Set(
+      uploadedRequirements.map((r: any) => `${r.student_id}::${r.requirement_name}`)
+    );
+
+    // Generate derived rows for requirements not yet in student_requirements table
+    const derivedRequirements: any[] = [];
+    for (const stu of students) {
+      const stype = (stu.student_type || 'continuing').toLowerCase();
+      const reqs = reqByType[stype] || reqByType.continuing;
+      for (const r of reqs) {
+        const key = `${stu.id}::${r.name}`;
+        if (!uploadedKeys.has(key)) {
+          // If filters are set, check them
+          const reqStatus = stu[r.field] || 'Pending';
+          if (status && reqStatus !== status) continue;
+          if (type && type !== 'Initial') continue;
+
+          derivedRequirements.push({
+            id: `derived-${stu.id}-${r.name.replace(/\s+/g, '_')}`,
+            student_id: stu.id,
+            student_number: stu.student_number,
+            first_name: stu.first_name,
+            last_name: stu.last_name,
+            student_type: stu.student_type,
+            course: stu.course,
+            requirement_name: r.name,
+            requirement_type: 'Initial',
+            status: reqStatus,
+            file_path: null,
+            file_name: null,
+            hard_copy_submitted: 0,
+            hard_copy_received_at: null,
+            remarks: null,
+            created_at: null,
+            updated_at: null,
+          });
+        }
+      }
+    }
+
+    const requirements = [...uploadedRequirements, ...derivedRequirements];
     res.json({ success: true, requirements });
   } catch (error: any) {
     console.error('Error getting requirements for review:', error);
@@ -233,12 +313,48 @@ export const getRequirementsForReview = async (req: Request, res: Response) => {
  */
 export const updateRequirementStatus = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    let { id } = req.params;
     const { status, remarks } = req.body;
     const reviewerId = (req as any).user?.id;
 
-    if (!['Verified', 'Rejected', 'Incomplete'].includes(status)) {
+    if (!['Received', 'Verified', 'Rejected', 'Incomplete'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+
+    // Handle derived requirements (not yet in student_requirements table)
+    if (String(id).startsWith('derived-')) {
+      // Parse: derived-<student_id>-<requirement_name_underscored>
+      const parts = String(id).replace('derived-', '').split('-');
+      const studentId = parseInt(parts[0], 10);
+      const reqName = parts.slice(1).join(' ').replace(/_/g, ' ');
+
+      // Look up actual requirement name from the known list
+      const knownNames = ['Form 137', 'Form 138', 'Transcript of Records (TOR)', 'Certificate of Transfer', 'Birth Certificate', 'Certificate of Good Moral'];
+      const matchedName = knownNames.find(n => n.replace(/\s+/g, ' ').toLowerCase() === reqName.toLowerCase()) || reqName;
+
+      // Insert a new row
+      const result = await run(
+        `INSERT INTO student_requirements (student_id, requirement_name, requirement_type, status, remarks, reviewed_by, reviewed_at, updated_at) VALUES (?, ?, 'Initial', ?, ?, ?, datetime('now'), datetime('now'))`,
+        [studentId, matchedName, status, remarks || null, reviewerId]
+      );
+      id = String(result.lastInsertRowid || result);
+
+      // Update flat column on students table
+      const fieldMap: Record<string, string> = {
+        'Form 137': 'form137_status',
+        'Form 138': 'form138_status',
+        'Transcript of Records (TOR)': 'tor_status',
+        'Certificate of Transfer': 'certificate_transfer_status',
+        'Birth Certificate': 'birth_certificate_status',
+        'Certificate of Good Moral': 'moral_certificate_status',
+      };
+      const dbField = fieldMap[matchedName];
+      if (dbField) {
+        const flatStatus = status === 'Verified' ? 'Submitted' : status === 'Rejected' ? 'Pending' : 'Pending';
+        await run(`UPDATE students SET ${dbField} = ? WHERE id = ?`, [flatStatus, studentId]);
+      }
+
+      return res.json({ success: true, message: `Requirement ${status.toLowerCase()} successfully` });
     }
 
     // Get the requirement to update the flat columns too
@@ -279,7 +395,23 @@ export const updateRequirementStatus = async (req: Request, res: Response) => {
  */
 export const confirmHardCopyReceipt = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    let { id } = req.params;
+
+    // Handle derived requirements (not yet in student_requirements table)
+    if (String(id).startsWith('derived-')) {
+      const parts = String(id).replace('derived-', '').split('-');
+      const studentId = parseInt(parts[0], 10);
+      const reqName = parts.slice(1).join(' ').replace(/_/g, ' ');
+
+      const knownNames = ['Form 137', 'Form 138', 'Transcript of Records (TOR)', 'Certificate of Transfer', 'Birth Certificate', 'Certificate of Good Moral'];
+      const matchedName = knownNames.find(n => n.replace(/\s+/g, ' ').toLowerCase() === reqName.toLowerCase()) || reqName;
+
+      const result = await run(
+        `INSERT INTO student_requirements (student_id, requirement_name, requirement_type, status, hard_copy_received_at, updated_at) VALUES (?, ?, 'Initial', 'Pending', datetime('now'), datetime('now'))`,
+        [studentId, matchedName]
+      );
+      return res.json({ success: true, message: 'Hard copy receipt confirmed' });
+    }
 
     await run(
       `UPDATE student_requirements SET hard_copy_received_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
