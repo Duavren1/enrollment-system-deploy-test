@@ -494,8 +494,8 @@ export const getRegistrarDashboardStats = async (req: AuthRequest, res: Response
       `SELECT COUNT(*) as count 
        FROM enrollment_subjects es
        JOIN enrollments e ON es.enrollment_id = e.id
-       WHERE es.grade IS NULL OR es.grade = ''
-       AND e.status = 'Approved'`
+       WHERE (es.grade IS NULL OR es.grade = '')
+       AND e.status IN ('Enrolled', 'Approved')`
     );
 
     // COR requests

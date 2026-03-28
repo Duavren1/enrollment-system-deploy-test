@@ -204,6 +204,49 @@ class StudentService {
       throw new Error(handleApiError(error));
     }
   }
+
+  /**
+   * Submit a promissory note for an installment period
+   */
+  async submitPromissoryNote(data: {
+    enrollment_id: number;
+    period: string;
+    amount_due: number;
+    promised_date: string;
+    reason: string;
+    file: File;
+  }): Promise<any> {
+    try {
+      const formData = new FormData();
+      formData.append('document', data.file);
+      formData.append('enrollment_id', data.enrollment_id.toString());
+      formData.append('period', data.period);
+      formData.append('amount_due', data.amount_due.toString());
+      formData.append('promised_date', data.promised_date);
+      formData.append('reason', data.reason || '');
+
+      const response = await api.post('/students/promissory-note', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
+  /**
+   * Get promissory notes for an enrollment
+   */
+  async getPromissoryNotes(enrollmentId: number): Promise<any> {
+    try {
+      const response = await api.get(`/students/promissory-notes/${enrollmentId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
 }
 
 export const studentService = new StudentService();

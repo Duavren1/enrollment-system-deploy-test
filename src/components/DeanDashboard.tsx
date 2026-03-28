@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_SERVER_URL } from '../utils/api';
+import { parseUTCDate } from '../utils/dateUtils';
 import { Button } from './ui/button';
 import { 
   LogOut, 
@@ -494,6 +495,45 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
       await loadPendingGrades();
     } catch (err: any) {
       setError(err.message || 'Failed to approve grade');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectGrade = async (enrollmentSubjectId: number) => {
+    if (!window.confirm('Are you sure you want to reject this grade? It will be cleared and sent back to admin for re-entry.')) return;
+    try {
+      setLoading(true);
+      await gradesService.rejectGrade(enrollmentSubjectId);
+      await loadPendingGrades();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reject grade');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApproveAllGrades = async (gradeIds: number[]) => {
+    if (!window.confirm(`Are you sure you want to approve all ${gradeIds.length} grade(s)?`)) return;
+    try {
+      setLoading(true);
+      await Promise.all(gradeIds.map(id => gradesService.approveGrade(id)));
+      await loadPendingGrades();
+    } catch (err: any) {
+      setError(err.message || 'Failed to approve grades');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectAllGrades = async (gradeIds: number[]) => {
+    if (!window.confirm(`Are you sure you want to reject all ${gradeIds.length} grade(s)? They will be cleared and sent back to admin.`)) return;
+    try {
+      setLoading(true);
+      await Promise.all(gradeIds.map(id => gradesService.rejectGrade(id)));
+      await loadPendingGrades();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reject grades');
     } finally {
       setLoading(false);
     }
@@ -1312,7 +1352,7 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-slate-900">{enr.first_name} {enr.last_name}</p>
                             <p className="text-sm text-slate-600">{enr.course || enr.program_name} • Year {enr.year_level}{enr.section ? ` • Section ${enr.section}` : ''} • {enr.semester} Sem</p>
-                            <p className="text-xs text-slate-400 mt-1">{enr.school_year} — Submitted {new Date(enr.created_at).toLocaleDateString()}</p>
+                            <p className="text-xs text-slate-400 mt-1">{enr.school_year} — Submitted {parseUTCDate(enr.created_at).toLocaleDateString()}</p>
                             {enr.scholarship_type && enr.scholarship_type !== 'None' && (
                               <span className="inline-flex items-center gap-1 mt-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
                                 🎓 {enr.scholarship_type}
@@ -1374,9 +1414,17 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
                                 <p className="font-semibold text-slate-900">{group.student_name}</p>
                                 <p className="text-xs text-slate-500 mt-0.5">{group.course} • Year {group.year_level} • {group.school_year} • {group.semester} Sem</p>
                               </div>
-                              <Badge className="bg-amber-100 text-amber-700 border-amber-200">
-                                {group.grades.length} {group.grades.length === 1 ? 'subject' : 'subjects'}
-                              </Badge>
+                              <div className="flex items-center gap-2">
+                                <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                                  {group.grades.length} {group.grades.length === 1 ? 'subject' : 'subjects'}
+                                </Badge>
+                                <Button size="sm" variant="outline" className="text-green-700 border-green-300 hover:bg-green-50" onClick={() => handleApproveAllGrades(group.grades.map((g: any) => g.id))}>
+                                  <CheckCircle className="h-3.5 w-3.5 mr-1" /> Approve All
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-700 border-red-300 hover:bg-red-50" onClick={() => handleRejectAllGrades(group.grades.map((g: any) => g.id))}>
+                                  <XCircle className="h-3.5 w-3.5 mr-1" /> Reject All
+                                </Button>
+                              </div>
                             </div>
                           </div>
                           {/* Subject Grades List */}
@@ -1384,7 +1432,7 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
                             <span>Subject</span>
                             <div className="flex items-center gap-3">
                               <span className="w-12 text-center">Grade</span>
-                              <span className="w-24 text-center">Action</span>
+                              <span className="w-40 text-center">Action</span>
                             </div>
                           </div>
                           <div className="divide-y divide-slate-100">
@@ -1394,13 +1442,16 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
                                   <p className="text-sm font-medium text-slate-800">{g.subject_code} — {g.subject_name}</p>
                                   <div className="flex items-center gap-3 mt-0.5">
                                     <span className="text-xs text-slate-500">{g.units} units</span>
-                                    <span className="text-xs text-slate-400">Submitted: {g.updated_at ? new Date(g.updated_at).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}</span>
+                                    <span className="text-xs text-slate-400">Submitted: {g.updated_at ? parseUTCDate(g.updated_at).toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}</span>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-3 shrink-0">
+                                <div className="flex items-center gap-2 shrink-0">
                                   <span className="text-sm font-bold text-indigo-600">{g.grade}</span>
                                   <Button size="sm" onClick={() => handleApproveGrade(g.id)}>
                                     <CheckCircle className="h-3.5 w-3.5 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRejectGrade(g.id)}>
+                                    <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
                                   </Button>
                                 </div>
                               </div>
@@ -1479,50 +1530,43 @@ export default function DeanDashboard({ onLogout }: DeanDashboardProps) {
                   </div>
                 </div>
 
-                {/* Right: Assessment Breakdown (editable) */}
+                {/* Right: Assessment Breakdown (read-only review) */}
                 <div className="col-span-3 space-y-4">
                   {selectedDeanEnrollment?.scholarship_type && selectedDeanEnrollment.scholarship_type !== 'None' && (
                     <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200">
                       <p className="text-xs font-bold text-indigo-700 mb-2">🎓 {selectedDeanEnrollment.scholarship_type}</p>
-                      <p className="text-[11px] text-slate-500 mb-2">Select coverage to apply deduction:</p>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        {(SCHOLARSHIP_DEFINITIONS[selectedDeanEnrollment.scholarship_type]?.coverage || []).map((c: string) => (
-                          <button key={c} type="button"
-                            onClick={() => setDeanFeeForm(f => ({ ...f, scholarship_coverage: c }))}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold text-left border-2 transition-all ${
-                              deanFeeForm.scholarship_coverage === c
-                                ? 'bg-indigo-100 text-slate-900 border-indigo-500'
-                                : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                            }`}>{c}</button>
-                        ))}
-                      </div>
+                      {deanFeeForm.scholarship_coverage && (
+                        <p className="text-xs text-slate-700">Coverage: <span className="font-semibold">{deanFeeForm.scholarship_coverage}</span></p>
+                      )}
                     </div>
                   )}
 
                   <div className="grid grid-cols-2 gap-3">
                     <div><Label className="text-xs">Tuition</Label>
-                      <Input type="number" value={deanFeeForm.tuition} onChange={e => setDeanFeeForm(f => ({ ...f, tuition: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.tuition} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                     <div><Label className="text-xs">Registration</Label>
-                      <Input type="number" value={deanFeeForm.registration} onChange={e => setDeanFeeForm(f => ({ ...f, registration: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.registration} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                     <div><Label className="text-xs">Library</Label>
-                      <Input type="number" value={deanFeeForm.library} onChange={e => setDeanFeeForm(f => ({ ...f, library: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.library} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                     <div><Label className="text-xs">Lab</Label>
-                      <Input type="number" value={deanFeeForm.lab} onChange={e => setDeanFeeForm(f => ({ ...f, lab: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.lab} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                     <div><Label className="text-xs">ID Fee</Label>
-                      <Input type="number" value={deanFeeForm.id_fee} onChange={e => setDeanFeeForm(f => ({ ...f, id_fee: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.id_fee} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                     <div><Label className="text-xs">Others</Label>
-                      <Input type="number" value={deanFeeForm.others} onChange={e => setDeanFeeForm(f => ({ ...f, others: Number(e.target.value) }))} />
+                      <Input type="number" value={deanFeeForm.others} readOnly className="bg-slate-50 cursor-default" />
                     </div>
                   </div>
 
-                  <div><Label className="text-xs">Remarks</Label>
-                    <Input value={deanFeeForm.remarks} onChange={e => setDeanFeeForm(f => ({ ...f, remarks: e.target.value }))} placeholder="Notes..." />
-                  </div>
+                  {deanFeeForm.remarks && (
+                    <div><Label className="text-xs">Remarks</Label>
+                      <p className="text-sm text-slate-700 mt-1 p-2 bg-slate-50 rounded-lg border">{deanFeeForm.remarks}</p>
+                    </div>
+                  )}
 
                   {/* Breakdown summary */}
                   <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm space-y-2">

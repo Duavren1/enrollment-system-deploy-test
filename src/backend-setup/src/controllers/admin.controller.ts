@@ -582,13 +582,34 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
        WHERE strftime('%Y', payment_date) = strftime('%Y', 'now')`
     );
 
+    // Pre-registration application queue counts
+    let preRegStats: any[] = [];
+    try {
+      preRegStats = await query(
+        `SELECT status, COUNT(*) as count FROM pre_registrations GROUP BY status`
+      );
+    } catch (e) {
+      // table may not exist yet
+    }
+
+    // Active courses count
+    let activeCourses = 0;
+    try {
+      const courseCount = await query(`SELECT COUNT(*) as count FROM courses WHERE status = 'Active' OR status IS NULL`);
+      activeCourses = courseCount[0]?.count || 0;
+    } catch (e) {
+      // table may not exist
+    }
+
     res.json({
       success: true,
       data: {
         totalStudents: totalStudents[0]?.count || 0,
         enrollmentStats,
         recentEnrollments,
-        transactionStats: transactionStats[0] || { total_count: 0, total_amount: 0, completed_amount: 0 }
+        transactionStats: transactionStats[0] || { total_count: 0, total_amount: 0, completed_amount: 0 },
+        preRegStats,
+        activeCourses
       }
     });
   } catch (error) {

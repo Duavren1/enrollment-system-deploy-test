@@ -324,9 +324,9 @@ export const getDeanDashboardStats = async (req: AuthRequest, res: Response) => 
     // Total students
     const totalStudents = await query("SELECT COUNT(*) as count FROM students WHERE status = 'Active'");
 
-    // Pending approvals (could be curriculum proposals, etc.)
+    // Pending approvals — enrollments awaiting dean review
     const pendingApprovals = await query(
-      "SELECT COUNT(*) as count FROM enrollments WHERE status = 'For Approval'"
+      "SELECT COUNT(*) as count FROM enrollments WHERE status = 'For Dean Approval'"
     );
 
     res.json({

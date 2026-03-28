@@ -29,4 +29,8 @@ router.put('/enrollment-reviews/:id/reject', authenticate, authorize('cashier', 
 router.get('/fees', authenticate, authorize('cashier', 'superadmin', 'registrar', 'admin', 'student', 'dean'), cashier.getFees);
 router.put('/fees', authenticate, authorize('cashier', 'superadmin'), cashier.updateFees);
 
+// Promissory Note Management
+router.get('/promissory-notes', authenticate, authorize('cashier', 'superadmin', 'admin'), cashier.getAllPromissoryNotes);
+router.put('/promissory-notes/:id/review', authenticate, authorize('cashier', 'superadmin', 'admin'), cashier.reviewPromissoryNoteCashier);
+
 export default router;

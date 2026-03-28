@@ -39,6 +39,7 @@ const PesoIcon = (props: any) => (
   <span {...props} className={(props.className || '') + ' inline-flex items-center'}>₱</span>
 );
 import api, { API_SERVER_URL } from '../utils/api';
+import { parseUTCDate } from '../utils/dateUtils';
 
 interface CashierDashboardProps {
   onLogout: () => void;
@@ -51,7 +52,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [stats, setStats] = useState({ pending: 0, completed: 0, rejected: 0, totalAmount: 0 });
-  const [analytics, setAnalytics] = useState({ totalCollections: 0, outstandingBalances: 0, pendingCount: 0 });
+  const [analytics, setAnalytics] = useState({ totalCollections: 0, outstandingBalances: 0, pendingCount: 0, totalTransactions: 0 });
   const [filters, setFilters] = useState({ status: 'Pending', search: '', school_year: '', semester: '' });
   const [expandedTx, setExpandedTx] = useState<number | null>(null);
   const [selectedTx, setSelectedTx] = useState<any>(null);
@@ -82,6 +83,12 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
   const [penaltyFeeConfig, setPenaltyFeeConfig] = useState<number>(500);
   const [editingPenaltyFee, setEditingPenaltyFee] = useState(false);
   const [penaltyFeeInput, setPenaltyFeeInput] = useState('500');
+
+  // Promissory note state
+  const [promissoryNotes, setPromissoryNotes] = useState<any[]>([]);
+  const [loadingPromissory, setLoadingPromissory] = useState(false);
+  const [promissoryRejectId, setPromissoryRejectId] = useState<number | null>(null);
+  const [promissoryRejectRemarks, setPromissoryRejectRemarks] = useState('');
 
   // Pre-registration verification state
   const [preRegQueue, setPreRegQueue] = useState<any[]>([]);
@@ -132,10 +139,20 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
       setAllTransactions(txList);
 
       // Calculate stats from full list
-      const pending = txList.filter((t: any) => t.status === 'Pending').length;
+      let pending = txList.filter((t: any) => t.status === 'Pending').length;
       const completed = txList.filter((t: any) => t.status === 'Completed').length;
       const rejected = txList.filter((t: any) => t.status === 'Rejected').length;
       const totalAmount = txList.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+      
+      // Add pre-registration pending count
+      try {
+        const preRegResp = await preRegistrationService.getCashierQueue({ status: 'Payment Submitted' });
+        const preRegPending = preRegResp?.data || [];
+        pending += preRegPending.length;
+      } catch (e) {
+        console.error('Failed to load pre-reg pending count', e);
+      }
+      
       setStats({ pending, completed, rejected, totalAmount });
 
       // Pull aggregated analytics
@@ -144,7 +161,8 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
       setAnalytics({
         totalCollections: data.totalCollections || 0,
         outstandingBalances: data.outstandingBalances || 0,
-        pendingCount: data.pendingCount || pending
+        pendingCount: data.pendingCount || pending,
+        totalTransactions: data.totalTransactions || 0
       });
     } catch (err: any) {
       setError(err.message || 'Failed to load transactions');
@@ -154,25 +172,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
   };
 
   useEffect(() => { loadTransactions(); }, [filters]);
-
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      if (activeSection !== 'Tuition Assessments') return;
-      try {
-        setLoadingAssessments(true);
-        const resp = await cashierService.getTuitionAssessments();
-        if (!mounted) return;
-        setAssessments(resp?.data || resp || []);
-      } catch (err) {
-        console.error('Failed loading assessments', err);
-      } finally {
-        if (mounted) setLoadingAssessments(false);
-      }
-    };
-    load();
-    return () => { mounted = false; };
-  }, [activeSection]);
 
   useEffect(() => {
     let mounted = true;
@@ -212,6 +211,14 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
         if (mounted) {
           setPendingTransactions(regularPending);
           setInstallmentPayments(installments);
+        }
+
+        // Load promissory notes
+        try {
+          const pnResp = await cashierService.getPromissoryNotes('Pending');
+          if (mounted) setPromissoryNotes(pnResp?.data || []);
+        } catch (e) {
+          console.error('Failed to load promissory notes', e);
         }
       } catch (err) {
         console.error('Failed loading pending transactions', err);
@@ -296,7 +303,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
 
   const formatTimeAgo = (dateString: string) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
+    const date = parseUTCDate(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -338,7 +345,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
     { name: 'Enrollment Review', icon: ClipboardList },
-    { name: 'Tuition Assessments', icon: FileText },
     { name: 'Pending Verifications', icon: Clock },
     { name: 'Fee Management', icon: Edit },
     { name: 'Transaction Logs', icon: FileText },
@@ -348,7 +354,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
     { label: 'Total Collections', value: `₱${analytics.totalCollections.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, icon: PesoIcon, color: 'from-green-500 to-green-600' },
     { label: 'Outstanding Balances', value: `₱${analytics.outstandingBalances.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, icon: AlertCircle, color: 'from-orange-500 to-orange-600' },
     { label: 'Pending Transactions', value: (analytics.pendingCount || stats.pending).toString(), icon: Clock, color: 'from-amber-500 to-amber-600' },
-    { label: 'Logged Transactions', value: allTransactions.length.toString(), icon: FileText, color: 'from-purple-500 to-purple-600' },
+    { label: 'Logged Transactions', value: (analytics.totalTransactions || allTransactions.length).toString(), icon: FileText, color: 'from-purple-500 to-purple-600' },
   ];
 
   const renderDashboardContent = () => {
@@ -1077,6 +1083,14 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
         
         setPendingTransactions(regularPending);
         setInstallmentPayments(installments);
+
+        // Load promissory notes
+        try {
+          const pnResp = await cashierService.getPromissoryNotes('Pending');
+          setPromissoryNotes(pnResp?.data || []);
+        } catch (e) {
+          console.error('Failed to load promissory notes', e);
+        }
       } catch (err) {
         console.error('Failed refreshing pending', err);
       } finally {
@@ -1168,7 +1182,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                   // Determine due date and if payment is late
                   // Each period is 1 month from enrollment date
                   // Down Payment = enrollment date, Prelim = +1mo, Midterm = +2mo, Finals = +3mo
-                  const enrollDate = new Date(ip.enrollment_date || ip.enrollment_created_at || ip.created_at);
+                  const enrollDate = parseUTCDate(ip.enrollment_date || ip.enrollment_created_at || ip.created_at);
                   const periodMonthOffset: Record<string, number> = {
                     'Down Payment': 0,
                     'Prelim Period': 1,
@@ -1332,6 +1346,117 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                             Approve
                           </Button>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Promissory Note Requests Section */}
+          <div className="mb-8" style={{ marginTop: '24px' }}>
+            <h4 className="font-semibold text-base mb-4 flex items-center gap-2">
+              <FileText className="h-5 w-5" style={{ color: '#d97706' }} />
+              Promissory Note Requests
+            </h4>
+            {promissoryNotes.length === 0 ? (
+              <p className="text-sm text-slate-500 ml-7">No pending promissory note requests.</p>
+            ) : (
+              <div className="space-y-3 ml-7">
+                {promissoryNotes.map((pn: any) => (
+                  <div key={pn.id} className="border rounded-lg p-4" style={{ backgroundColor: '#fffbeb', borderColor: '#fcd34d' }}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{pn.first_name} {pn.last_name} • {pn.sid}</p>
+                          <Badge className="border-0 text-xs px-2" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+                            Promissory
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-slate-500">{pn.course} • Year {pn.year_level} • {pn.school_year} {pn.semester}</p>
+                        <div className="mt-2 space-y-1">
+                          <p className="text-sm text-slate-700">Period: <span className="font-semibold">{pn.period}</span></p>
+                          <p className="text-sm text-slate-700">Amount Due: <span className="font-semibold">₱{(pn.amount_due || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></p>
+                          <p className="text-sm text-slate-700">Promised Date: <span className="font-semibold">{pn.promised_date ? parseUTCDate(pn.promised_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}</span></p>
+                          {pn.reason && <p className="text-sm text-slate-700">Reason: <span className="italic">{pn.reason}</span></p>}
+                          <p className="text-xs text-slate-500">Submitted: {parseUTCDate(pn.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {pn.file_path && (
+                          <Button size="sm" variant="outline" onClick={() => handleDownloadReceipt(pn.file_path, pn.file_name || 'promissory-note')}>
+                            <Download className="h-4 w-4 mr-2" />
+                            View Document
+                          </Button>
+                        )}
+                        {promissoryRejectId === pn.id ? (
+                          <div className="w-48 space-y-2 border rounded-lg p-2 bg-white">
+                            <textarea
+                              placeholder="Enter rejection remarks..."
+                              className="w-full text-xs p-2 border rounded"
+                              value={promissoryRejectRemarks}
+                              onChange={(e) => setPromissoryRejectRemarks(e.target.value)}
+                              rows={3}
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={async () => {
+                                  try {
+                                    await cashierService.reviewPromissoryNote(pn.id, 'Rejected', promissoryRejectRemarks);
+                                    alert('Promissory note rejected');
+                                    setPromissoryRejectId(null);
+                                    setPromissoryRejectRemarks('');
+                                    await refreshPending();
+                                  } catch (err: any) {
+                                    alert(err.message || 'Failed to reject promissory note');
+                                  }
+                                }}
+                              >
+                                Confirm
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setPromissoryRejectId(null);
+                                  setPromissoryRejectRemarks('');
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => setPromissoryRejectId(pn.id)}
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Reject
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={async () => {
+                                if (!confirm('Approve this promissory note request?')) return;
+                                try {
+                                  await cashierService.reviewPromissoryNote(pn.id, 'Approved');
+                                  alert('Promissory note approved');
+                                  await refreshPending();
+                                } catch (err: any) {
+                                  alert(err.message || 'Failed to approve promissory note');
+                                }
+                              }}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Approve
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1878,18 +2003,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
             </button>
 
             <button
-              onClick={() => setActiveSection('Tuition Assessments')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                activeSection === 'Tuition Assessments' 
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg' 
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <FileText className="h-5 w-5" />
-              Tuition Assessments
-            </button>
-
-            <button
               onClick={() => setActiveSection('Pending Verifications')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                 activeSection === 'Pending Verifications' 
@@ -1959,7 +2072,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                 <h1 className="text-2xl mb-1">
                   {activeSection === 'Dashboard' && 'Cashier Dashboard'}
                   {activeSection === 'Enrollment Review' && 'Enrollment Review'}
-                  {activeSection === 'Tuition Assessments' && 'Tuition Assessments'}
                   {activeSection === 'Pending Verifications' && 'Payment Verifications'}
                   {activeSection === 'Fee Management' && 'Fee Management'}
                   {activeSection === 'Transaction Logs' && 'Transaction Logs'}
@@ -1968,7 +2080,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                 <p className="text-sm text-slate-600">
                   {activeSection === 'Dashboard' && 'Payment processing and transaction management'}
                   {activeSection === 'Enrollment Review' && 'Review enrollments for fee verification'}
-                  {activeSection === 'Tuition Assessments' && 'View and manage tuition assessments'}
                   {activeSection === 'Pending Verifications' && 'Verify and process pending student payments'}
                   {activeSection === 'Fee Management' && 'Configure and manage course fees'}
                   {activeSection === 'Transaction Logs' && 'View all financial transactions and history'}
@@ -1998,7 +2109,6 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
             {/* Content */}
             {activeSection === 'Dashboard' && renderDashboardContent()}
             {activeSection === 'Enrollment Review' && renderEnrollmentReviewContent()}
-            {activeSection === 'Tuition Assessments' && renderTuitionAssessmentsContent()}
             {activeSection === 'Pending Verifications' && renderPendingVerificationsContent()}
             {activeSection === 'Fee Management' && renderFeeManagementContent()}
             {activeSection === 'Transaction Logs' && renderTransactionsContent()}
@@ -2033,7 +2143,7 @@ export default function CashierDashboard({ onLogout }: CashierDashboardProps) {
                     <p><span className="text-slate-500">Method:</span> {selectedTx.payment_method}</p>
                     <p><span className="text-slate-500">Reference:</span> {selectedTx.reference_number || '—'}</p>
                     <p><span className="text-slate-500">Amount:</span> ₱{selectedTx.amount?.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                    <p><span className="text-slate-500">Date:</span> {new Date(selectedTx.created_at).toLocaleDateString()}</p>
+                    <p><span className="text-slate-500">Date:</span> {parseUTCDate(selectedTx.created_at).toLocaleDateString()}</p>
                   </div>
                 </div>
               </div>

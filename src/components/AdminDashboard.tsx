@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_SERVER_URL } from '../utils/api';
+import { parseUTCDate } from '../utils/dateUtils';
 import { Button } from './ui/button';
 import { 
   User, 
@@ -241,6 +242,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [collegeStudents, setCollegeStudents] = useState<any[]>([]);
   const [shsGrades, setShsGrades] = useState<any[]>([]);
   const [collegeGrades, setCollegeGrades] = useState<any[]>([]);
+  const [curriculumForEdit, setCurriculumForEdit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [loadingSection, setLoadingSection] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
@@ -343,15 +345,33 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         const response = await adminService.getDashboardStats();
         const statsData = response.data || response;
         
-        // Calculate enrollment counts from stats
+        // Calculate enrollment counts from stats — sum ALL matching statuses
         let enrolledCount = 0;
         let pendingCount = 0;
+        const pendingStatuses = ['Pending', 'Pending Assessment', 'For Admin Approval', 'For Registrar Assessment', 'For Payment', 'For Subject Selection', 'For Dean Approval', 'Payment Verification'];
         if (statsData.enrollmentStats && Array.isArray(statsData.enrollmentStats)) {
-          const approved = statsData.enrollmentStats.find((s: any) => s.status === 'Approved');
-          const pending = statsData.enrollmentStats.find((s: any) => s.status === 'Pending' || s.status === 'Pending Assessment' || s.status === 'For Admin Approval');
-          enrolledCount = approved?.count || 0;
-          pendingCount = pending?.count || 0;
+          for (const s of statsData.enrollmentStats) {
+            if (s.status === 'Approved' || s.status === 'Enrolled') {
+              enrolledCount += Number(s.count) || 0;
+            }
+            if (pendingStatuses.includes(s.status)) {
+              pendingCount += Number(s.count) || 0;
+            }
+          }
         }
+
+        // Pre-registration queue count
+        let preRegPendingCount = 0;
+        if (statsData.preRegStats && Array.isArray(statsData.preRegStats)) {
+          for (const s of statsData.preRegStats) {
+            // Count all statuses EXCEPT 'Account Created' and 'Rejected'
+            if (s.status && s.status !== 'Account Created' && s.status !== 'Rejected') {
+              preRegPendingCount += Number(s.count) || 0;
+            }
+          }
+        }
+
+        const activeCourses = statsData.activeCourses || 0;
         
         setStats([
           { 
@@ -359,28 +379,28 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             value: (statsData.totalStudents || 0).toString(), 
             icon: Users, 
             color: 'from-blue-500 to-blue-600',
-            change: '+0%'
+            change: ''
           },
           { 
             label: 'Enrolled', 
             value: enrolledCount.toString(), 
             icon: CheckCircle, 
             color: 'from-green-500 to-green-600',
-            change: '+0%'
+            change: ''
           },
           { 
             label: 'Pending', 
             value: pendingCount.toString(), 
             icon: Clock, 
             color: 'from-orange-500 to-orange-600',
-            change: '+0'
+            change: ''
           },
           { 
-            label: 'Active Courses', 
-            value: '0', 
-            icon: BookOpen, 
-            color: 'from-purple-500 to-purple-600',
-            change: '+0'
+            label: 'Applications', 
+            value: preRegPendingCount.toString(), 
+            icon: FileText, 
+            color: 'from-indigo-500 to-indigo-600',
+            change: ''
           },
         ]);
 
@@ -643,7 +663,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   };
 
   useEffect(() => {
-    if (activeSection === 'Application Queue') {
+    if (activeSection === 'Application Queue' || activeSection === 'Dashboard') {
       loadPreRegAdminQueue();
     }
   }, [activeSection]);
@@ -682,7 +702,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const formatTimeAgo = (date: string) => {
     if (!date) return 'N/A';
     const now = new Date();
-    const then = new Date(date);
+    const then = parseUTCDate(date);
     const diffMs = now.getTime() - then.getTime();
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
@@ -696,7 +716,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   const formatDate = (date: string) => {
     if (!date) return 'N/A';
-    const d = new Date(date);
+    const d = parseUTCDate(date);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
@@ -1033,36 +1053,33 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   };
 
   const handleSaveGrades = async () => {
-    if (!selectedStudent?.grades) return;
+    if (!curriculumForEdit?.subjects) return;
     try {
       setError('');
       setLoadingSection('save-grades');
-      // Convert grades array to the format expected by the API
-      // Only include entries with a valid enrollment_subject_id and a grade value
-      const gradesToUpdate = selectedStudent.grades
-        .filter((g: any) => (g.enrollment_subject_id || g.enrollment_subject_id === 0) && g.grade !== '' && g.grade !== null && g.grade !== undefined)
-        .map((g: any) => ({
-          enrollment_subject_id: g.enrollment_subject_id,
-          grade: g.grade
+      // Only save grades that were actually CHANGED from their original value
+      const gradesToUpdate = (curriculumForEdit.subjects || [])
+        .filter((s: any) => {
+          if (!s.is_editable || !s.enrollment_subject_id) return false;
+          if (s.grade === '' || s.grade === null || s.grade === undefined) return false;
+          // Compare current grade to original — only include if changed
+          const original = String(s.original_grade ?? '').trim();
+          const current = String(s.grade).trim();
+          return current !== original;
+        })
+        .map((s: any) => ({
+          enrollment_subject_id: s.enrollment_subject_id,
+          grade: s.grade
         }));
       
       if (gradesToUpdate.length > 0) {
         await gradesService.bulkUpdateGrades(gradesToUpdate);
-        alert('Grades saved and submitted for dean approval');
+        alert(`${gradesToUpdate.length} grade(s) saved and submitted for dean approval`);
         setEditGradesOpen(false);
+        setCurriculumForEdit(null);
         await fetchDashboardData();
       } else {
-        // Provide detailed error info
-        const hasNoGrades = selectedStudent.grades.every((g: any) => !g.grade || g.grade === '');
-        const hasNoIds = selectedStudent.grades.some((g: any) => !(g.enrollment_subject_id || g.enrollment_subject_id === 0));
-        
-        let msg = 'No valid grades to save. ';
-        if (hasNoGrades) {
-          msg += 'Please enter at least one grade for a subject.';
-        } else if (hasNoIds) {
-          msg += 'Some subjects are missing enrollment data. Try reloading the student.';
-        }
-        alert(msg);
+        alert('No grades were changed. Modify at least one grade before saving.');
       }
     } catch (err: any) {
       setError(err.message || 'Failed to update grades');
@@ -1206,9 +1223,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.color} flex items-center justify-center shadow-md`}>
                     <Icon className="h-6 w-6 text-white" />
                   </div>
-                  <Badge variant="secondary" className="bg-green-100 text-green-700 border-0">
-                    {stat.change}
-                  </Badge>
+                  {stat.change && (
+                    <Badge variant="secondary" className="bg-green-100 text-green-700 border-0">
+                      {stat.change}
+                    </Badge>
+                  )}
                 </div>
                 <h3 className="text-3xl mb-1">{stat.value}</h3>
                 <p className="text-sm text-slate-600">{stat.label}</p>
@@ -1276,7 +1295,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         <p className="text-sm text-slate-900 font-medium">{log.action || log.type || 'Activity'}</p>
                         <p className="text-xs text-slate-500">{log.details || log.message || ''}</p>
                       </div>
-                      <div className="text-xs text-slate-400">{new Date(log.created_at || log.ts || log.time || Date.now()).toLocaleString()}</div>
+                      <div className="text-xs text-slate-400">{parseUTCDate(log.created_at || log.ts || log.time).toLocaleString()}</div>
                     </div>
                   </div>
                 ))}
@@ -1394,6 +1413,59 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           </ScrollArea>
         </Card>
       </div>
+
+      {/* Application Queue (Pre-Registration) */}
+      <Card className="border-0 shadow-lg overflow-hidden mt-6">
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 flex items-center justify-between">
+          <h3 className="text-white">Application Queue</h3>
+          <div className="flex items-center gap-2">
+            <Badge className="bg-white/20 text-white border-0">
+              {preRegAdminQueue.filter((p: any) => p.status !== 'Account Created' && p.status !== 'Rejected').length} pending
+            </Badge>
+            <Button variant="ghost" size="sm" className="text-white hover:bg-white/10 h-7 text-xs" onClick={() => setActiveSection('Application Queue')}>
+              View All
+            </Button>
+          </div>
+        </div>
+        <ScrollArea className="h-[320px]">
+          <div className="p-4">
+            {loadingPreRegAdmin ? (
+              <div className="flex items-center justify-center h-48">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              </div>
+            ) : preRegAdminQueue.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-8">No pre-registration applications in queue</p>
+            ) : (
+              <div className="space-y-2">
+                {preRegAdminQueue.slice(0, 10).map((app: any, index: number) => (
+                  <div key={app.id || index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white text-sm shrink-0">
+                        {(app.first_name || '?').charAt(0)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-slate-900 truncate">{app.first_name} {app.last_name}</p>
+                        <p className="text-xs text-slate-500">{app.reference_id} · {app.course || 'N/A'} · {app.email}</p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-2">
+                      <Badge className={`border-0 text-xs px-2 py-0 ${
+                        app.status === 'In Admin Queue' ? 'bg-indigo-100 text-indigo-700' :
+                        app.status === 'Account Created' ? 'bg-green-100 text-green-700' :
+                        app.status === 'Payment Submitted' ? 'bg-amber-100 text-amber-700' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {app.status}
+                      </Badge>
+                      <p className="text-xs text-slate-500 mt-0.5">{app.created_at ? parseUTCDate(app.created_at).toLocaleDateString() : ''}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+      </Card>
     </>
   );
 
@@ -2009,7 +2081,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     <div className="flex items-center justify-between text-xs text-slate-500">
                       <span>User: {entry.username || 'System'}</span>
                       <span>{entry.entity_type && `Entity: ${entry.entity_type} #${entry.entity_id}`}</span>
-                      <span>{new Date(entry.created_at + 'Z').toLocaleString('en-US', { 
+                      <span>{parseUTCDate(entry.created_at).toLocaleString('en-US', { 
                         year: 'numeric', 
                         month: '2-digit', 
                         day: '2-digit', 
@@ -2225,7 +2297,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            const gradesData = await gradesService.getStudentGrades(student.id, { subject_type: 'SHS', school_year: selectedSchoolYear, semester: selectedSemester });
+                            // Fetch ALL grades (no year/semester filter) to show full curriculum history
+                            const gradesData = await gradesService.getStudentGrades(student.id, { subject_type: 'SHS' });
                             const grades = gradesData?.data || gradesData || [];
                             setSelectedStudent({ ...student, grades });
                             setViewGradesOpen(true);
@@ -2242,50 +2315,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            // Fetch existing grades - student.id is now the string student_id
-                            const gradesResp = await gradesService.getStudentGrades(student.id, { subject_type: 'SHS', school_year: selectedSchoolYear, semester: selectedSemester });
-                            const existingGrades = gradesResp?.data || gradesResp || [];
-
-                            // Fetch student details to locate latest enrollment
-                            const stuResp = await adminService.getStudentById(student.dbId || student.studentId);
-                            const stuData = stuResp?.data || stuResp || {};
-                            const latestEnrollment = (stuData.enrollments || []).slice().reverse()[0];
-
-                            let subjectsList: any[] = [];
-                            if (latestEnrollment) {
-                              const details = await enrollmentService.getEnrollmentDetails(latestEnrollment.id);
-                              const enrollmentDetails = details?.data || details || {};
-                              subjectsList = enrollmentDetails.enrollment_subjects || enrollmentDetails.subjects || [];
+                            // Load the full curriculum with grades for this student
+                            const currResp = await adminService.getStudentCurriculum(student.dbId || student.studentId);
+                            const currData = currResp?.data || currResp || {};
+                            // Store original grades so we only submit changed ones
+                            if (currData.subjects) {
+                              currData.subjects = currData.subjects.map((s: any) => ({ ...s, original_grade: s.grade ?? '' }));
                             }
-
-                            // Build grades list with proper enrollment_subject_id mapping
-                            let gradesMerged: any[];
-                            if (subjectsList.length > 0) {
-                              gradesMerged = subjectsList.map((es: any) => {
-                                const match = existingGrades.find((g: any) => g.id === es.id || g.subject_id === es.subject_id);
-                                return {
-                                  subject: es.subject_name || es.subject_code || match?.subject_name || '',
-                                  grade: es.grade || match?.grade || '',
-                                  enrollment_subject_id: es.id,
-                                  subject_id: es.subject_id
-                                };
-                              });
-                            } else if (existingGrades.length > 0) {
-                              gradesMerged = existingGrades.map((g: any) => ({
-                                subject: g.subject_name || g.subject_code || '',
-                                grade: g.grade || '',
-                                enrollment_subject_id: g.id,
-                                subject_id: g.subject_id
-                              }));
-                            } else {
-                              gradesMerged = [];
-                            }
-
-                            setSelectedStudent({ ...student, grades: gradesMerged });
+                            setCurriculumForEdit(currData);
+                            setSelectedStudent(student);
                             setEditGradesOpen(true);
                           } catch (err: any) {
-                            console.error('Failed to prepare edit grades:', err);
-                            setError(err.message || 'Failed to load grades or enrolled subjects');
+                            console.error('Failed to load curriculum:', err);
+                            setError(err.message || 'Failed to load curriculum');
                           }
                         }}
                       >
@@ -2372,7 +2414,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            const gradesData = await gradesService.getStudentGrades(student.id, { subject_type: 'College', school_year: selectedSchoolYear, semester: selectedSemester });
+                            // Fetch ALL grades (no year/semester filter) to show full curriculum history
+                            const gradesData = await gradesService.getStudentGrades(student.id, { subject_type: 'College' });
                             const grades = gradesData?.data || gradesData || [];
                             setSelectedStudent({ ...student, grades });
                             setViewGradesOpen(true);
@@ -2389,57 +2432,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            // Fetch available college subjects
-                            const subjectsData = await maintenanceService.getAllSubjectsByType({ subject_type: 'College' });
-                            if (subjectsData.success) {
-                              setSubjects(subjectsData.data || []);
+                            // Load the full curriculum with grades for this student
+                            const currResp = await adminService.getStudentCurriculum(student.dbId || student.studentId);
+                            const currData = currResp?.data || currResp || {};
+                            // Store original grades so we only submit changed ones
+                            if (currData.subjects) {
+                              currData.subjects = currData.subjects.map((s: any) => ({ ...s, original_grade: s.grade ?? '' }));
                             }
-
-                            // student.id is the string student_id (e.g. "2024-00001"), student.dbId is the numeric DB id
-                            const gradesResp = await gradesService.getStudentGrades(student.id, { subject_type: 'College' });
-                            const existingGrades = gradesResp?.data || gradesResp || [];
-
-                            const stuResp = await adminService.getStudentById(student.dbId || student.studentId);
-                            const stuData = stuResp?.data || stuResp || {};
-                            const latestEnrollment = (stuData.enrollments || []).slice().reverse()[0];
-
-                            let subjectsList: any[] = [];
-                            if (latestEnrollment) {
-                              const details = await enrollmentService.getEnrollmentDetails(latestEnrollment.id);
-                              const enrollmentDetails = details?.data || details || {};
-                              subjectsList = enrollmentDetails.enrollment_subjects || enrollmentDetails.subjects || [];
-                            }
-
-                            // Build grades list: prefer enrollment subjects list, map enrollment_subject_id from es.id
-                            let gradesMerged: any[];
-                            if (subjectsList.length > 0) {
-                              gradesMerged = subjectsList.map((es: any) => {
-                                // existingGrades come from enrollment_subjects with es.* so id = enrollment_subject_id
-                                const match = existingGrades.find((g: any) => g.id === es.id || g.subject_id === es.subject_id);
-                                return {
-                                  subject: es.subject_name || es.subject_code || match?.subject_name || '',
-                                  grade: es.grade || match?.grade || '',
-                                  enrollment_subject_id: es.id,
-                                  subject_id: es.subject_id
-                                };
-                              });
-                            } else if (existingGrades.length > 0) {
-                              // Fallback: existingGrades from getStudentGrades returns es.* where es.id = enrollment_subject_id
-                              gradesMerged = existingGrades.map((g: any) => ({
-                                subject: g.subject_name || g.subject_code || '',
-                                grade: g.grade || '',
-                                enrollment_subject_id: g.id,
-                                subject_id: g.subject_id
-                              }));
-                            } else {
-                              gradesMerged = [];
-                            }
-
-                            setSelectedStudent({ ...student, grades: gradesMerged });
+                            setCurriculumForEdit(currData);
+                            setSelectedStudent(student);
                             setEditGradesOpen(true);
                           } catch (err: any) {
-                            console.error('Failed to prepare edit grades:', err);
-                            setError(err.message || 'Failed to load grades or enrolled subjects');
+                            console.error('Failed to load curriculum:', err);
+                            setError(err.message || 'Failed to load curriculum');
                           }
                         }}
                       >
@@ -2784,12 +2789,21 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                                         name={`semester-${sy.id}`}
                                         value={sem}
                                         checked={activeSem === sem}
-                                        onChange={(e) => {
-                                          const data = JSON.parse(localStorage.getItem('activeSemesterConfig') || '{}');
-                                          data[sy.id] = e.target.value;
-                                          localStorage.setItem('activeSemesterConfig', JSON.stringify(data));
-                                          setActiveSemesterConfig(e.target.value);
-                                          fetchDashboardData();
+                                        onChange={async (e) => {
+                                          const semVal = e.target.value;
+                                          const semNum = semVal === '1st' ? 1 : semVal === '2nd' ? 2 : 3;
+                                          try {
+                                            // Update the database so all dashboards see the change
+                                            await maintenanceService.activateSemester(sy.id, semNum);
+                                            // Also update localStorage for UI consistency
+                                            const data = JSON.parse(localStorage.getItem('activeSemesterConfig') || '{}');
+                                            data[sy.id] = semVal;
+                                            localStorage.setItem('activeSemesterConfig', JSON.stringify(data));
+                                            setActiveSemesterConfig(semVal);
+                                            fetchDashboardData();
+                                          } catch (err) {
+                                            console.error('Failed to activate semester:', err);
+                                          }
                                         }}
                                         className="cursor-pointer"
                                       />
@@ -3230,7 +3244,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
                 {/* Account Info */}
                 <div className="p-3 bg-green-100/60 rounded-lg text-sm space-y-2">
-                  <p className="text-green-800"><span className="font-medium">Account created on:</span> {new Date(app.account_created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                  <p className="text-green-800"><span className="font-medium">Account created on:</span> {parseUTCDate(app.account_created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
 
                   {preRegViewCredsId === app.id ? (
                     <div className="mt-2 p-3 bg-white rounded-lg border border-green-200 space-y-1">
@@ -3922,9 +3936,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       <Dialog open={viewGradesOpen} onOpenChange={setViewGradesOpen}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Student Grades</DialogTitle>
+            <DialogTitle>Student Grades — Curriculum History</DialogTitle>
             <DialogDescription>
-              View detailed grades for {selectedStudent?.name}
+              View all grades for {selectedStudent?.name}
             </DialogDescription>
           </DialogHeader>
           
@@ -3949,149 +3963,228 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 </div>
               </div>
 
-              <div>
-                <h4 className="mb-3">Grades</h4>
-                <div className="space-y-2">
-                  {selectedStudent.grades?.map((grade: any, index: number) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-slate-900">{grade.subject_code || grade.subject}</p>
-                        <p className="text-xs text-slate-500">{grade.subject_name || grade.subject}</p>
-                      </div>
-                      <Badge className="bg-blue-100 text-blue-700 border-0 ml-2">
-                        {grade.grade || 'N/A'}
-                      </Badge>
+              {(() => {
+                // Group grades by school_year and semester
+                const gradesList = selectedStudent.grades || [];
+                const grouped: Record<string, any[]> = {};
+                gradesList.forEach((g: any) => {
+                  const key = `${g.school_year || 'Unknown'} — ${g.semester || 'Unknown'} Semester`;
+                  if (!grouped[key]) grouped[key] = [];
+                  grouped[key].push(g);
+                });
+                const groupKeys = Object.keys(grouped);
+
+                if (groupKeys.length === 0) {
+                  return <p className="text-center text-slate-500 py-4">No grades found for this student.</p>;
+                }
+
+                return groupKeys.map((key) => (
+                  <div key={key}>
+                    <h4 className="mb-2 text-sm font-semibold text-slate-700 border-b pb-1">{key}</h4>
+                    <div className="space-y-2 mb-4">
+                      {grouped[key].map((grade: any, index: number) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-slate-900">{grade.subject_code || grade.subject}</p>
+                            <p className="text-xs text-slate-500">{grade.subject_name || grade.subject} {grade.units ? `(${grade.units}u)` : ''}</p>
+                          </div>
+                          <Badge className={`border-0 ml-2 ${grade.grade ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {grade.grade || 'N/A'}
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                ));
+              })()}
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Edit Grades Dialog */}
-      <Dialog open={editGradesOpen} onOpenChange={setEditGradesOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Student Grades & Subjects</DialogTitle>
-            <DialogDescription>
-              Edit grades and enrolled subjects for {selectedStudent?.name}
-            </DialogDescription>
-          </DialogHeader>
-          
-          {selectedStudent && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 pb-4 border-b">
-                <div>
-                  <p className="text-sm text-slate-500">Student Name</p>
-                  <p className="font-medium">{selectedStudent.name}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Student ID</p>
-                  <p className="font-medium">{selectedStudent.id}</p>
-                </div>
-              </div>
+      {/* Edit Grades Dialog — Curriculum Table View */}
+      <Dialog open={editGradesOpen} onOpenChange={(open) => { setEditGradesOpen(open); if (!open) setCurriculumForEdit(null); }}>
+        <DialogContent className="max-w-5xl p-0 gap-0 rounded-xl flex flex-col max-h-[80vh] [&>button]:text-white [&>button]:opacity-90 [&>button:hover]:opacity-100">
+          {selectedStudent && curriculumForEdit && (() => {
+            const subjects = curriculumForEdit.subjects || [];
+            const programName = curriculumForEdit.program_name || curriculumForEdit.program_code || selectedStudent.course;
+            const totalUnits = curriculumForEdit.total_units || subjects.reduce((sum: number, s: any) => sum + (s.units || 0), 0);
 
-              <div>
-                <h4 className="mb-3">Edit Grades & Subjects</h4>
-                <div className="space-y-3">
-                  {(selectedStudent.grades || []).map((grade: any, index: number) => {
-                    // Filter available subjects based on student's course
-                    const availableSubjects = subjects.filter((s: any) => {
-                      // If subject is not assigned a specific course, it's a general subject
-                      if (!s.course) return true;
-                      // Otherwise, match by course
-                      return s.course === selectedStudent.course;
-                    });
+            // Group by year_level then semester
+            const grouped: Record<number, Record<string, any[]>> = {};
+            for (const s of subjects) {
+              const yr = s.year_level || 1;
+              const sem = s.semester || '1st';
+              if (!grouped[yr]) grouped[yr] = {};
+              if (!grouped[yr][sem]) grouped[yr][sem] = [];
+              grouped[yr][sem].push(s);
+            }
 
-                    // Show a warning if this grade entry doesn't have an enrollment_subject_id
-                    const hasValidId = grade.enrollment_subject_id || grade.enrollment_subject_id === 0;
-                    
+            const yearLabels: Record<number, string> = { 1: 'FIRST YEAR', 2: 'SECOND YEAR', 3: 'THIRD YEAR', 4: 'FOURTH YEAR' };
+            const semLabels: Record<string, string> = { '1st': 'FIRST SEMESTER', '2nd': 'SECOND SEMESTER', '3rd': 'THIRD SEMESTER' };
+            const sortedYears = Object.keys(grouped).map(Number).sort();
+            const completedUnits = subjects.filter((s: any) => s.remarks === 'PASSED').reduce((sum: number, s: any) => sum + (s.units || 0), 0);
+            const editableCount = subjects.filter((s: any) => s.is_editable).length;
+
+            return (
+              <>
+                {/* Sticky Header */}
+                <div className="flex-shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white rounded-t-xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-bold tracking-wide">{programName}</h2>
+                      <p className="text-blue-200 text-sm mt-0.5">{selectedStudent.name} — {selectedStudent.id}</p>
+                    </div>
+                    <div className="text-right text-sm">
+                      <p className="text-blue-200">Curriculum Grades</p>
+                      <p className="text-white font-semibold">{completedUnits} / {totalUnits} units completed</p>
+                    </div>
+                  </div>
+                </div>
+
+                {editableCount > 0 && (
+                  <div className="flex-shrink-0 px-6 py-2 bg-amber-50 border-b border-amber-200 text-sm text-amber-800 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    {editableCount} subject(s) available for grade entry. Only currently enrolled subjects can be edited. Saved grades will be submitted for dean approval.
+                  </div>
+                )}
+
+                {/* Scrollable Content */}
+                <div className="flex-1 overflow-auto min-h-0 p-4 space-y-4">
+                  {sortedYears.map((year) => {
+                    const semesters = grouped[year];
+                    const sortedSems = ['1st', '2nd', '3rd'].filter((s) => semesters[s]);
+
                     return (
-                      <div key={index} className="flex items-center gap-3">
-                        {!hasValidId && (
-                          <div className="text-xs text-orange-600 italic">(New Subject)</div>
-                        )}
-                        <Select 
-                          value={grade.subject_id?.toString() || ''} 
-                          onValueChange={(value) => {
-                            const selectedSubject = availableSubjects.find(s => s.id.toString() === value);
-                            handleUpdateGradeField(index, 'subject', selectedSubject?.subject_name || '');
-                            handleUpdateGradeField(index, 'subject_id', selectedSubject?.id || null);
-                            // Important: keep the enrollment_subject_id unchanged - it's needed for the API
-                            // Only update it if we're adding a new subject (no enrollment_subject_id yet)
-                          }}
-                        >
-                          <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Select subject" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableSubjects.length === 0 ? (
-                              <div className="p-2 text-sm text-slate-500">No subjects available</div>
-                            ) : (
-                              availableSubjects.map((subject: any) => (
-                                <SelectItem key={subject.id} value={subject.id.toString()}>
-                                  {subject.subject_code} - {subject.subject_name} ({subject.units}u)
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                        <Input 
-                          value={grade.grade ?? ''} 
-                          className="w-24"
-                          placeholder="Grade"
-                          type="number"
-                          step="0.25"
-                          min="1"
-                          max="5"
-                          onChange={(e) => handleUpdateGradeField(index, 'grade', e.target.value)}
-                        />
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="text-red-600 hover:bg-red-50"
-                          onClick={() => handleRemoveSubject(index)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div key={year} className="border rounded-lg">
+                        {/* Year Header */}
+                        <div className="bg-slate-800 px-4 py-2 text-white">
+                          <h3 className="text-sm font-bold tracking-wider">{yearLabels[year] || `YEAR ${year}`}</h3>
+                        </div>
+
+                        {sortedSems.map((sem) => {
+                          const semSubjects = semesters[sem];
+                          const semTotalUnits = semSubjects.reduce((sum: number, s: any) => sum + (s.units || 0), 0);
+
+                          return (
+                            <div key={sem}>
+                              <div className="bg-blue-600 px-4 py-1.5 text-white">
+                                <h4 className="text-xs font-semibold tracking-wider">{semLabels[sem] || sem.toUpperCase()}</h4>
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-sm" style={{ minWidth: '700px' }}>
+                                  <thead>
+                                    <tr className="bg-slate-100 border-b border-slate-200">
+                                      <th className="px-3 py-2 text-left font-semibold text-slate-700 w-[100px]">CODE</th>
+                                      <th className="px-3 py-2 text-left font-semibold text-slate-700">SUBJECT</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[80px]">Pre-Req</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[50px]">LEC</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[50px]">LAB</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[60px]">UNITS</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[110px]">GRADE</th>
+                                      <th className="px-3 py-2 text-center font-semibold text-slate-700 w-[90px]">REMARKS</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {semSubjects.map((subj: any, idx: number) => {
+                                      const isPassed = subj.remarks === 'PASSED';
+                                      const isFailed = subj.remarks === 'FAILED';
+                                      const isEditable = subj.is_editable;
+
+                                      return (
+                                        <tr key={subj.subject_id || idx} className={`border-b border-slate-100 ${isPassed ? 'bg-green-50' : isFailed ? 'bg-red-50' : isEditable ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
+                                          <td className="px-3 py-1.5 font-semibold text-slate-800">{subj.subject_code}</td>
+                                          <td className="px-3 py-1.5 text-slate-700">{subj.subject_name}</td>
+                                          <td className="px-3 py-1.5 text-center text-xs text-slate-500">{subj.prerequisite_code || 'NONE'}</td>
+                                          <td className="px-3 py-1.5 text-center text-slate-600">{subj.lec}</td>
+                                          <td className="px-3 py-1.5 text-center text-slate-600">{subj.lab}</td>
+                                          <td className="px-3 py-1.5 text-center font-medium text-slate-800">{subj.units}</td>
+                                          <td className="px-3 py-1.5 text-center">
+                                            {isEditable ? (
+                                              <Input
+                                                value={subj.grade ?? ''}
+                                                className="w-20 h-7 text-center text-sm mx-auto"
+                                                placeholder="—"
+                                                type="number"
+                                                step="0.25"
+                                                min="1"
+                                                max="5"
+                                                onChange={(e) => {
+                                                  const updated = { ...curriculumForEdit };
+                                                  const allSubjects = [...(updated.subjects || [])];
+                                                  const globalIdx = allSubjects.findIndex((s: any) => s.subject_id === subj.subject_id);
+                                                  if (globalIdx !== -1) {
+                                                    allSubjects[globalIdx] = { ...allSubjects[globalIdx], grade: e.target.value };
+                                                    updated.subjects = allSubjects;
+                                                    setCurriculumForEdit(updated);
+                                                  }
+                                                }}
+                                              />
+                                            ) : (
+                                              <span className="font-medium text-slate-700">{subj.grade || '—'}</span>
+                                            )}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-center">
+                                            {isPassed ? (
+                                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                                <CheckIcon className="h-3 w-3" /> PASSED
+                                              </span>
+                                            ) : isFailed ? (
+                                              <span className="text-xs font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">FAILED</span>
+                                            ) : isEditable ? (
+                                              <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">ENROLLED</span>
+                                            ) : (
+                                              <span className="text-xs text-slate-400">—</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                    <tr className="bg-slate-50 border-t-2 border-slate-200">
+                                      <td className="px-3 py-1.5" colSpan={3}>
+                                        <span className="font-semibold text-slate-700 text-xs">Total Units</span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-center font-bold text-slate-700">{semSubjects.reduce((s: number, x: any) => s + (x.lec || 0), 0)}</td>
+                                      <td className="px-3 py-1.5 text-center font-bold text-slate-700">{semSubjects.reduce((s: number, x: any) => s + (x.lab || 0), 0)}</td>
+                                      <td className="px-3 py-1.5 text-center font-bold text-blue-700">{semTotalUnits}</td>
+                                      <td colSpan={2}></td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
                 </div>
-                <Button size="sm" variant="outline" className="mt-3 gap-2" onClick={() => {
-                  if (!selectedStudent) return;
-                  const grades = Array.isArray(selectedStudent.grades) ? [...selectedStudent.grades] : [];
-                  grades.push({ subject: '', grade: '', enrollment_subject_id: null, subject_id: null });
-                  setSelectedStudent({ ...selectedStudent, grades });
-                }}>
-                  <Plus className="h-4 w-4" />
-                  Add Subject
-                </Button>
-              </div>
 
-              <div className="flex gap-2 justify-end border-t pt-4">
-                <Button variant="outline" onClick={() => setEditGradesOpen(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600"
-                  onClick={handleSaveGrades}
-                  disabled={loadingSection === 'save-grades'}
-                >
-                  {loadingSection === 'save-grades' ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    'Save Changes'
+                {/* Footer with Save */}
+                <div className="flex-shrink-0 flex gap-2 justify-end px-6 py-4 border-t bg-slate-50 rounded-b-xl">
+                  <Button variant="outline" onClick={() => { setEditGradesOpen(false); setCurriculumForEdit(null); }}>
+                    Cancel
+                  </Button>
+                  {editableCount > 0 && (
+                    <Button 
+                      className="bg-gradient-to-r from-blue-600 to-indigo-600"
+                      onClick={handleSaveGrades}
+                      disabled={loadingSection === 'save-grades'}
+                    >
+                      {loadingSection === 'save-grades' ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Saving & Submitting...
+                        </>
+                      ) : (
+                        'Save & Submit for Dean Approval'
+                      )}
+                    </Button>
                   )}
-                </Button>
-              </div>
-            </div>
-          )}
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

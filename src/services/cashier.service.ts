@@ -210,6 +210,25 @@ class CashierService {
       throw new Error(handleApiError(error));
     }
   }
+
+  // Promissory Note Management
+  async getPromissoryNotes(status: string = 'Pending') {
+    try {
+      const res = await api.get('/cashier/promissory-notes', { params: { status } });
+      return res.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
+  async reviewPromissoryNote(id: number, status: 'Approved' | 'Rejected', remarks?: string) {
+    try {
+      const res = await api.put(`/cashier/promissory-notes/${id}/review`, { status, remarks });
+      return res.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
 }
 
 export const cashierService = new CashierService();

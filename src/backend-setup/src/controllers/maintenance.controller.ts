@@ -2,6 +2,72 @@ import { Response } from 'express';
 import { query, run } from '../database/connection';
 import { AuthRequest } from '../middleware/auth.middleware';
 
+// Get active school year and semester (public — needed by students)
+export const getActivePeriod = async (req: AuthRequest, res: Response) => {
+  try {
+    const schoolYear = await query(
+      'SELECT * FROM school_years WHERE is_active = 1 LIMIT 1'
+    );
+    const semester = await query(
+      `SELECT s.* FROM semesters s 
+       JOIN school_years sy ON s.school_year_id = sy.id 
+       WHERE sy.is_active = 1 AND s.is_active = 1 LIMIT 1`
+    );
+
+    const sy = schoolYear[0] || null;
+    const sem = semester[0] || null;
+
+    // Convert semester_number to enrollment format ('1st', '2nd', '3rd')
+    let semesterLabel = '';
+    if (sem) {
+      if (sem.semester_number === 1) semesterLabel = '1st';
+      else if (sem.semester_number === 2) semesterLabel = '2nd';
+      else if (sem.semester_number === 3) semesterLabel = '3rd';
+    }
+
+    res.json({
+      success: true,
+      data: {
+        school_year: sy?.school_year || '',
+        semester: semesterLabel,
+        semester_name: sem?.semester_name || '',
+        enrollment_start: sy?.enrollment_start || '',
+        enrollment_end: sy?.enrollment_end || '',
+      }
+    });
+  } catch (error) {
+    console.error('Get active period error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Activate a specific semester for a school year (updates DB)
+export const activateSemester = async (req: AuthRequest, res: Response) => {
+  try {
+    const { school_year_id, semester_number } = req.body;
+    if (!school_year_id || !semester_number) {
+      return res.status(400).json({ success: false, message: 'school_year_id and semester_number are required' });
+    }
+
+    // Deactivate ALL semesters for this school year
+    await run(
+      'UPDATE semesters SET is_active = 0, updated_at = datetime(\'now\') WHERE school_year_id = ?',
+      [school_year_id]
+    );
+
+    // Activate the chosen semester
+    await run(
+      'UPDATE semesters SET is_active = 1, updated_at = datetime(\'now\') WHERE school_year_id = ? AND semester_number = ?',
+      [school_year_id, semester_number]
+    );
+
+    res.json({ success: true, message: 'Semester activated successfully' });
+  } catch (error) {
+    console.error('Activate semester error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // Sections Management
 export const getAllSections = async (req: AuthRequest, res: Response) => {
   try {

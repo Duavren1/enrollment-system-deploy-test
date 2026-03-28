@@ -484,6 +484,36 @@ async function setupDatabase() {
       // Ignore if tables don't exist yet
     }
 
+    // Create promissory_notes table for students who can't pay on time
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS promissory_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enrollment_id INTEGER NOT NULL,
+        student_id INTEGER NOT NULL,
+        period TEXT NOT NULL,
+        amount_due REAL NOT NULL,
+        promised_date TEXT NOT NULL,
+        reason TEXT,
+        file_path TEXT,
+        file_name TEXT,
+        status TEXT DEFAULT 'Pending' CHECK(status IN ('Pending', 'Approved', 'Rejected')),
+        remarks TEXT,
+        reviewed_by INTEGER,
+        reviewed_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (enrollment_id) REFERENCES enrollments(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    console.log('✅ Promissory notes table created');
+
+    // Create indexes for promissory_notes
+    db.exec('CREATE INDEX IF NOT EXISTS idx_promissory_enrollment ON promissory_notes(enrollment_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_promissory_student ON promissory_notes(student_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_promissory_status ON promissory_notes(status)');
+
     // Create activity_logs table
     db.exec(`
       CREATE TABLE IF NOT EXISTS activity_logs (
@@ -1127,35 +1157,37 @@ async function setupDatabase() {
     `).run();
     console.log('✅ Programs created (BSIT + BSCS)');
 
-    // Seed school year 2023-2024 (inactive, for Juan's historical data)
+    // Seed school year 2025-2026 (inactive — Juan's previous Year 1 data)
     db.prepare(`
       INSERT OR IGNORE INTO school_years (school_year, start_date, end_date, enrollment_start, enrollment_end, is_active)
-      VALUES ('2023-2024', '2023-08-01', '2024-05-31', '2023-07-01', '2023-08-15', 0)
+      VALUES ('2025-2026', '2025-08-01', '2026-05-31', '2025-07-01', '2025-08-15', 0)
     `).run();
-    const syOld = db.prepare("SELECT id FROM school_years WHERE school_year = '2023-2024'").get() as any;
+    console.log('✅ School year 2025-2026 created (inactive)');
+
+    const syOld = db.prepare("SELECT id FROM school_years WHERE school_year = '2025-2026'").get() as any;
     if (syOld) {
       const insertSemOld = db.prepare(`INSERT OR IGNORE INTO semesters (school_year_id, semester_number, semester_name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?)`);
-      insertSemOld.run(syOld.id, 1, '1st Trimester', '2023-08-01', '2023-11-30', 0);
-      insertSemOld.run(syOld.id, 2, '2nd Trimester', '2023-12-01', '2024-03-31', 0);
-      insertSemOld.run(syOld.id, 3, '3rd Trimester', '2024-04-01', '2024-05-31', 0);
+      insertSemOld.run(syOld.id, 1, '1st Trimester', '2025-08-01', '2025-11-30', 0);
+      insertSemOld.run(syOld.id, 2, '2nd Trimester', '2025-12-01', '2026-03-31', 0);
+      insertSemOld.run(syOld.id, 3, '3rd Trimester', '2026-04-01', '2026-05-31', 0);
+      console.log('✅ Semesters for 2025-2026 created');
     }
-    console.log('✅ School year 2023-2024 created (inactive)');
 
-    // Seed school year 2024-2025 (active)
+    // Seed school year 2026-2027 (active)
     db.prepare(`
       INSERT OR IGNORE INTO school_years (school_year, start_date, end_date, enrollment_start, enrollment_end, is_active)
-      VALUES ('2024-2025', '2024-08-01', '2025-05-31', '2024-07-01', '2024-08-15', 1)
+      VALUES ('2026-2027', '2026-08-01', '2027-05-31', '2026-07-01', '2026-08-15', 1)
     `).run();
-    console.log('✅ School year 2024-2025 created (active)');
+    console.log('✅ School year 2026-2027 created (active)');
 
-    // Seed semesters for 2024-2025
-    const syRow = db.prepare("SELECT id FROM school_years WHERE school_year = '2024-2025'").get() as any;
-    if (syRow) {
-      const insertSem = db.prepare(`INSERT OR IGNORE INTO semesters (school_year_id, semester_number, semester_name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?)`);
-      insertSem.run(syRow.id, 1, '1st Trimester', '2024-08-01', '2024-11-30', 1);
-      insertSem.run(syRow.id, 2, '2nd Trimester', '2024-12-01', '2025-03-31', 0);
-      insertSem.run(syRow.id, 3, '3rd Trimester', '2025-04-01', '2025-05-31', 0);
-      console.log('✅ Semesters for 2024-2025 created');
+    // Seed semesters for 2026-2027
+    const syNew = db.prepare("SELECT id FROM school_years WHERE school_year = '2026-2027'").get() as any;
+    if (syNew) {
+      const insertSemNew = db.prepare(`INSERT OR IGNORE INTO semesters (school_year_id, semester_number, semester_name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?, ?)`);
+      insertSemNew.run(syNew.id, 1, '1st Trimester', '2026-08-01', '2026-11-30', 1);
+      insertSemNew.run(syNew.id, 2, '2nd Trimester', '2026-12-01', '2027-03-31', 0);
+      insertSemNew.run(syNew.id, 3, '3rd Trimester', '2027-04-01', '2027-05-31', 0);
+      console.log('✅ Semesters for 2026-2027 created');
     }
 
     // Link all BSIT subjects to the curriculum table
@@ -1289,6 +1321,7 @@ async function setupDatabase() {
         student_type: 'Continuing',
         course: 'BSCS',
         year_level: 2,
+        section: '1',
         contact_number: '09171234567',
         address: '123 Rizal Street, Manila City',
         birth_date: '2004-05-15',
@@ -1359,8 +1392,8 @@ async function setupDatabase() {
     const insertStudent = db.prepare(`
       INSERT OR IGNORE INTO students (
         user_id, student_id, first_name, middle_name, last_name, suffix,
-        student_type, course, year_level, contact_number, address, birth_date, gender, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')
+        student_type, course, year_level, section, contact_number, address, birth_date, gender, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')
     `);
 
     const insertManySampleStudents = db.transaction((students: any[]) => {
@@ -1370,7 +1403,7 @@ async function setupDatabase() {
           insertStudent.run(
             user.id, student.student_id, student.first_name, student.middle_name,
             student.last_name, student.suffix, student.student_type, student.course,
-            student.year_level, student.contact_number, student.address,
+            student.year_level, student.section || null, student.contact_number, student.address,
             student.birth_date, student.gender
           );
         }
@@ -1405,19 +1438,19 @@ async function setupDatabase() {
       // Mark Juan as grades complete for Year 1
       db.prepare('UPDATE students SET grades_complete = 1 WHERE id = ?').run(juanId);
 
-      // Seed Juan's Year 1 completed enrollments (2023-2024, all 3 trimesters)
+      // Seed Juan's Year 1 completed enrollments (2025-2026, all 3 trimesters)
       const juanTrimesters = ['1st', '2nd', '3rd'];
       for (const sem of juanTrimesters) {
         db.prepare(`
           INSERT OR IGNORE INTO enrollments (student_id, school_year, semester, status, created_at, updated_at)
-          VALUES (?, '2023-2024', ?, 'Enrolled', datetime('now'), datetime('now'))
+          VALUES (?, '2025-2026', ?, 'Enrolled', datetime('now'), datetime('now'))
         `).run(juanId, sem);
       }
-      console.log('✅ Juan Year 1 enrollments created (2023-2024)');
+      console.log('✅ Juan Year 1 enrollments created (2025-2026)');
 
       // Get Juan's enrollment IDs and seed grades
       const juanEnrollments = db.prepare(
-        "SELECT id, semester FROM enrollments WHERE student_id = ? AND school_year = '2023-2024' ORDER BY id"
+        "SELECT id, semester FROM enrollments WHERE student_id = ? AND school_year = '2025-2026' ORDER BY id"
       ).all(juanId) as any[];
 
       // BSCS Year 1 subjects by semester
@@ -1478,11 +1511,11 @@ async function setupDatabase() {
     // Seed sections (Section 1 and Section 2)
     db.exec(`
       INSERT OR IGNORE INTO sections (section_code, section_name, course, year_level, school_year, semester, status)
-      VALUES ('1', 'Section 1', 'BSCS', 1, '2024-2025', '1st', 'Active');
+      VALUES ('1', 'Section 1', 'BSCS', 1, '2026-2027', '1st', 'Active');
     `);
     db.exec(`
       INSERT OR IGNORE INTO sections (section_code, section_name, course, year_level, school_year, semester, status)
-      VALUES ('2', 'Section 2', 'BSCS', 1, '2024-2025', '1st', 'Active');
+      VALUES ('2', 'Section 2', 'BSCS', 1, '2026-2027', '1st', 'Active');
     `);
     console.log('✅ Sections seeded (Section 1, Section 2)');
 

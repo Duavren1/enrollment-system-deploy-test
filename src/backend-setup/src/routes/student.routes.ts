@@ -7,7 +7,9 @@ import {
   uploadDocument,
   downloadDocument,
   getDocumentByPath,
-  getEnrollmentDocuments
+  getEnrollmentDocuments,
+  submitPromissoryNote,
+  getPromissoryNotes
 } from '../controllers/student.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import multer from 'multer';
@@ -56,5 +58,10 @@ router.get('/documents/enrollment/:enrollmentId', authenticate, authorize('admin
 router.get('/enrollment/form', authenticate, authorize('student'), require('../controllers/student.controller').downloadEnrollmentForm);
 router.get('/enrollment/cor', authenticate, authorize('student'), require('../controllers/student.controller').downloadCOR);
 router.get('/curriculum-checklist', authenticate, authorize('student'), require('../controllers/student.controller').getCurriculumChecklist);
+
+// Promissory note routes
+router.post('/promissory-note', authenticate, authorize('student'), upload.single('document'), submitPromissoryNote);
+router.get('/promissory-notes/:enrollmentId', authenticate, authorize('student'), getPromissoryNotes);
+router.put('/promissory-note/:id/review', authenticate, authorize('admin', 'superadmin', 'cashier'), require('../controllers/student.controller').reviewPromissoryNote);
 
 export default router;

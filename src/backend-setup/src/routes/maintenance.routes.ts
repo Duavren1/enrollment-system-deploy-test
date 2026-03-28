@@ -1,5 +1,7 @@
 import express from 'express';
 import {
+  getActivePeriod,
+  activateSemester,
   getAllSections,
   createSection,
   updateSection,
@@ -21,6 +23,12 @@ import {
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
+
+// Active period (accessible by all authenticated users)
+router.get('/active-period', authenticate, getActivePeriod);
+
+// Activate a semester (admin/superadmin only)
+router.put('/semesters/activate', authenticate, authorize('admin', 'superadmin'), activateSemester);
 
 // Sections
 router.get('/sections', authenticate, authorize('admin', 'superadmin'), getAllSections);

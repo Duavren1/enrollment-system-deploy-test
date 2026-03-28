@@ -65,4 +65,7 @@ router.put('/enrollments/:id/approve-assessment', authenticate, authorize('admin
 import { createAccountsForExistingStudents } from '../controllers/admin.controller';
 router.post('/students/create-accounts', authenticate, authorize('admin', 'superadmin'), createAccountsForExistingStudents);
 
+// Student curriculum (admin view — returns full curriculum with grades for any student)
+router.get('/students/:id/curriculum', authenticate, authorize('admin', 'superadmin', 'dean', 'registrar'), require('../controllers/student.controller').getStudentCurriculum);
+
 export default router;

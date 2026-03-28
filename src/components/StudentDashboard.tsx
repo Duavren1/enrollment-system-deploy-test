@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_SERVER_URL } from '../utils/api';
+import { parseUTCDate } from '../utils/dateUtils';
 import { Button } from './ui/button';
 import {
   User, 
@@ -23,7 +24,9 @@ import {
   FilePlus2,
   Send,
   ShieldCheck,
-  XCircle
+  XCircle,
+  FileText,
+  Printer
 } from 'lucide-react';
 import { enrollmentService } from '../services/enrollment.service';
 import { studentService } from '../services/student.service';
@@ -31,6 +34,7 @@ import { subjectService } from '../services/subject.service';
 import paymentsService from '../services/payments.service';
 import { gradesService } from '../services/grades.service';
 import { cashierService } from '../services/cashier.service';
+import { maintenanceService } from '../services/maintenance.service';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
@@ -59,6 +63,8 @@ interface StudentDashboardProps {
 }
 export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   const [activeSection, setActiveSection] = useState('Dashboard');
+  const activeSectionRef = useRef(activeSection);
+  useEffect(() => { activeSectionRef.current = activeSection; }, [activeSection]);
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [studentType, setStudentType] = useState<string>('');
   const [enrollmentStep, setEnrollmentStep] = useState(1);
@@ -89,8 +95,8 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [uploadedDocuments, setUploadedDocuments] = useState<Record<string, File>>({});
   const [scholarshipSupportingDocs, setScholarshipSupportingDocs] = useState<File[]>([]);
-  const [schoolYear, setSchoolYear] = useState('2024-2025');
-  const [semester, setSemester] = useState('1st Semester');
+  const [schoolYear, setSchoolYear] = useState('');
+  const [semester, setSemester] = useState('');
   const [installmentPaymentOpen, setInstallmentPaymentOpen] = useState(false);
   const [selectedInstallmentPeriod, setSelectedInstallmentPeriod] = useState<string | null>(null);
   const [penaltyPaymentAmount, setPenaltyPaymentAmount] = useState<number | null>(null);
@@ -135,6 +141,16 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   const [reqActiveTab, setReqActiveTab] = useState('initial');
   const [uploadingReq, setUploadingReq] = useState<string | null>(null);
   const [incForm, setIncForm] = useState({ requirement_name: '' });
+
+  // Promissory note state
+  const [promissoryNotes, setPromissoryNotes] = useState<any[]>([]);
+  const [promissoryDialogOpen, setPromissoryDialogOpen] = useState(false);
+  const [promissoryPeriod, setPromissoryPeriod] = useState<string | null>(null);
+  const [promissoryAmount, setPromissoryAmount] = useState<number>(0);
+  const [promissoryFile, setPromissoryFile] = useState<File | null>(null);
+  const [promissoryDate, setPromissoryDate] = useState('');
+  const [promissoryReason, setPromissoryReason] = useState('');
+  const [submittingPromissory, setSubmittingPromissory] = useState(false);
 
   const SCHOLAR_TYPES = [
     'None',
@@ -271,13 +287,23 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   useEffect(() => {
     fetchStudentData();
     // poll for updates every 30s (notifications and enrollment status)
+    // Skip fetchStudentData when on Enroll tab to avoid re-rendering PaymentForm
     const poll = setInterval(() => {
-      fetchNotifications();
-      fetchStudentData();
+      if (activeSectionRef.current !== 'Enroll') {
+        fetchNotifications();
+        fetchStudentData();
+      }
     }, 30000);
     fetchNotifications();
     return () => clearInterval(poll);
   }, []);
+
+  // Re-check active period and enrollment status when navigating to Enroll tab
+  useEffect(() => {
+    if (activeSection === 'Enroll') {
+      fetchStudentData();
+    }
+  }, [activeSection]);
 
   useEffect(() => {
     let mounted = true;
@@ -303,7 +329,8 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
   useEffect(() => {
     let mounted = true;
     const loadCurriculum = async () => {
-      if (activeSection !== 'Curriculum Checklist') return;
+      if (activeSection !== 'Curriculum Checklist' && activeSection !== 'Enroll') return;
+      if (curriculumData && activeSection === 'Enroll') return; // Already loaded, no need to refetch for enrollment
       try {
         setLoadingCurriculum(true);
         const resp = await studentService.getCurriculumChecklist();
@@ -426,6 +453,16 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
             setInstallmentSchedule([]);
             setHasDownPayment(false);
           }
+
+          // Fetch promissory notes for this enrollment
+          try {
+            const pnResp = await studentService.getPromissoryNotes(currentEnrollment.id);
+            if (mounted) {
+              setPromissoryNotes(pnResp?.data || []);
+            }
+          } catch (pnErr) {
+            console.error('Failed to load promissory notes:', pnErr);
+          }
         }
       } catch (err) {
         console.error('Failed to load installment schedule', err);
@@ -444,8 +481,27 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     let current: any = null;
     let paymentsList: any[] = [];
     let assessmentPayload: any = null;
+    let activeSchoolYear = schoolYear;
+    let activeSemester = semester;
     try {
       setLoading(true);
+
+      // Fetch active school year and semester from backend
+      try {
+        const periodResp = await maintenanceService.getActivePeriod();
+        const periodData = periodResp?.data || periodResp;
+        if (periodData?.school_year) {
+          activeSchoolYear = periodData.school_year;
+          setSchoolYear(periodData.school_year);
+        }
+        if (periodData?.semester) {
+          activeSemester = periodData.semester;
+          setSemester(periodData.semester);
+        }
+      } catch (err) {
+        console.error('Failed to fetch active period:', err);
+      }
+
       const profile = await studentService.getProfile();
       student = profile.student || profile.data?.student || profile;
       setStudentProfile(student);
@@ -478,10 +534,20 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       const enrollmentsList = enrollmentsData?.data || [];
       setEnrollments(enrollmentsList);
 
-      current =
-        enrollmentsList.find((e: any) => e.status !== 'Rejected' && e.status !== 'Enrolled') ||
-        enrollmentsList.find((e: any) => e.status === 'Enrolled' && e.school_year === schoolYear);
+      // Only look for enrollment in the CURRENT active period — past semesters are history
+      current = enrollmentsList.find((e: any) =>
+        e.school_year === activeSchoolYear && e.semester === activeSemester && e.status !== 'Rejected'
+      );
       setCurrentEnrollment(current);
+
+      if (current) {
+        setEnrollmentStatus(current.status || 'none');
+      } else {
+        // No enrollment for this period — show the enrollment form
+        setEnrollmentStatus('none');
+        setEnrollmentDetails(null);
+        setCurrentCourses([]);
+      }
 
       // Load available subjects only for the student's course
       try {
@@ -509,7 +575,6 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       }
 
       if (current) {
-        setEnrollmentStatus(current.status || 'none');
         const detailsResp = await enrollmentService.getEnrollmentDetails(current.id);
         const details = detailsResp?.data?.enrollment || detailsResp?.data || {};
         setEnrollmentDetails(details);
@@ -684,13 +749,13 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     },
     { 
       label: 'Approved', 
-      value: enrollments.filter((e: any) => e.status === 'Approved').length.toString(), 
+      value: enrollments.filter((e: any) => e.status === 'Enrolled' || e.status === 'Approved').length.toString(), 
       icon: CheckCircle2, 
       color: 'from-green-500 to-green-600' 
     },
     { 
       label: 'Pending', 
-      value: enrollments.filter((e: any) => e.status === 'Pending').length.toString(), 
+      value: enrollments.filter((e: any) => e.status !== 'Enrolled' && e.status !== 'Approved' && e.status !== 'Rejected').length.toString(), 
       icon: Clock, 
       color: 'from-orange-500 to-orange-600' 
     },
@@ -1046,8 +1111,8 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       Student: ${studentProfile?.first_name || ''} ${studentProfile?.last_name || ''}
       Student ID: ${studentProfile?.student_id || ''}
       
-      Date: ${new Date(payment.ts || payment.created_at).toLocaleDateString()}
-      Time: ${new Date(payment.ts || payment.created_at).toLocaleTimeString()}
+      Date: ${parseUTCDate(payment.ts || payment.created_at).toLocaleDateString()}
+      Time: ${parseUTCDate(payment.ts || payment.created_at).toLocaleTimeString()}
       
       Reference: ${payment.reference || payment.reference_number || payment.id || 'N/A'}
       Method: ${payment.method || payment.payment_method || 'N/A'}
@@ -1056,7 +1121,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       
       Status: ${isApproved ? (payment.status === 'Completed' ? 'Verified' : 'Approved') : payment.status || 'Pending'}
       
-      ${payment.approved_at ? `Approved Date: ${new Date(payment.approved_at).toLocaleDateString()}` : ''}
+      ${payment.approved_at ? `Approved Date: ${parseUTCDate(payment.approved_at).toLocaleDateString()}` : ''}
       ${payment.remarks ? `Remarks: ${payment.remarks}` : ''}
       
       =====================================
@@ -1111,6 +1176,166 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     }
   };
 
+  // ─── Promissory Note Functions ───
+
+  const generatePromissoryNoteTemplate = (period: string, amount: number, dueDate: string) => {
+    const studentName = studentProfile ? `${studentProfile.first_name || ''} ${studentProfile.middle_name || ''} ${studentProfile.last_name || ''}`.trim() : '___________________';
+    const studentId = studentProfile?.student_id || '___________________';
+    const course = studentProfile?.course || '___________________';
+    const sy = currentEnrollment?.school_year || '___________________';
+    const sem = currentEnrollment?.semester || '___________________';
+
+    // Word-compatible HTML document with mso namespace for .doc format
+    const docContent = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8">
+  <title>Promissory Note - ${period}</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    @page { size: 8.5in 11in; margin: 1in; }
+    body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; color: #333; line-height: 1.6; }
+    .header { text-align: center; margin-bottom: 20pt; border-bottom: 2px solid #333; padding-bottom: 10pt; }
+    .header h1 { margin: 0; font-size: 18pt; letter-spacing: 2pt; text-transform: uppercase; }
+    .header p { margin: 4pt 0; font-size: 11pt; color: #555; }
+    .title { text-align: center; font-size: 16pt; font-weight: bold; margin: 20pt 0; text-decoration: underline; text-transform: uppercase; }
+    table.info { width: 100%; border-collapse: collapse; margin: 15pt 0; }
+    table.info td { padding: 4pt 6pt; font-size: 11pt; vertical-align: bottom; }
+    table.info td.label { font-weight: bold; width: 35%; }
+    table.info td.value { border-bottom: 1px solid #333; }
+    .body-text { font-size: 11pt; margin: 15pt 0; text-align: justify; }
+    .amount-box { border: 1px solid #999; padding: 10pt 16pt; margin: 12pt 0; text-align: center; font-size: 14pt; font-weight: bold; background: #f5f5f5; }
+    .field-row { margin: 10pt 0; font-size: 11pt; }
+    .blank-line { display: inline-block; border-bottom: 1px solid #333; min-width: 250pt; }
+    .blank-box { border-bottom: 1px solid #333; width: 100%; display: block; min-height: 50pt; margin-top: 4pt; }
+    .terms { font-size: 10pt; margin: 16pt 0; padding: 8pt; border: 1px solid #ddd; }
+    .terms h4 { margin: 0 0 6pt 0; font-size: 11pt; }
+    .terms ul { margin: 4pt 0; padding-left: 18pt; }
+    .terms li { margin: 2pt 0; }
+    table.signature { width: 100%; margin-top: 40pt; }
+    table.signature td { width: 45%; text-align: center; vertical-align: top; padding-top: 30pt; }
+    table.signature td .line { border-top: 1px solid #333; padding-top: 4pt; font-size: 10pt; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Enrollment System</h1>
+    <p>Promissory Note for Tuition Payment</p>
+  </div>
+
+  <div class="title">Promissory Note</div>
+
+  <table class="info">
+    <tr><td class="label">Student Name:</td><td class="value">${studentName}</td></tr>
+    <tr><td class="label">Student ID:</td><td class="value">${studentId}</td></tr>
+    <tr><td class="label">Program/Course:</td><td class="value">${course}</td></tr>
+    <tr><td class="label">School Year:</td><td class="value">${sy}</td></tr>
+    <tr><td class="label">Semester:</td><td class="value">${sem}</td></tr>
+    <tr><td class="label">Payment Period:</td><td class="value">${period}</td></tr>
+  </table>
+
+  <p class="body-text">
+    I, <strong>${studentName}</strong>, a bonafide student of this institution, do hereby acknowledge my financial obligation
+    and promise to pay the following amount on or before the date specified below:
+  </p>
+
+  <div class="amount-box">
+    Amount Due: &#8369;${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+  </div>
+
+  <p class="field-row"><strong>Original Due Date:</strong> <span class="blank-line">${dueDate}</span></p>
+  <p class="field-row"><strong>Promised Payment Date:</strong> <span class="blank-line">&nbsp;</span></p>
+  <p class="field-row"><strong>Reason for Extension:</strong></p>
+  <p class="field-row"><span class="blank-box">&nbsp;</span></p>
+
+  <div class="terms">
+    <h4>Terms and Conditions:</h4>
+    <ul>
+      <li>I understand that failure to pay on the promised date may result in additional penalties.</li>
+      <li>I agree that my enrollment status may be affected if payment is not made by the promised date.</li>
+      <li>I acknowledge that this promissory note does not waive any applicable late penalty fees.</li>
+      <li>This promissory note is subject to approval by the Cashier's Office.</li>
+    </ul>
+  </div>
+
+  <table class="signature">
+    <tr>
+      <td><div class="line">Student's Signature over Printed Name</div></td>
+      <td>&nbsp;</td>
+      <td><div class="line">Date Signed</div></td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    const blob = new Blob(['\ufeff' + docContent], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Promissory_Note_${period.replace(/\s+/g, '_')}_${studentId || 'student'}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSubmitPromissoryNote = async (opts?: { period?: string; amount?: number; date?: string; reason?: string; file?: File | null }) => {
+    const period = opts?.period || promissoryPeriod;
+    const amount = opts?.amount ?? promissoryAmount;
+    const date = opts?.date || promissoryDate;
+    const reason = opts?.reason ?? promissoryReason;
+    const file = opts?.file !== undefined ? opts.file : promissoryFile;
+    if (!currentEnrollment || !period || !file || !date) {
+      alert('Please fill in all required fields and upload the signed promissory note');
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to submit this promissory note?')) return;
+
+    try {
+      setSubmittingPromissory(true);
+      await studentService.submitPromissoryNote({
+        enrollment_id: currentEnrollment.id,
+        period: period,
+        amount_due: amount,
+        promised_date: date,
+        reason: reason,
+        file: file,
+      });
+      alert('Promissory note submitted successfully! It will be reviewed by the Cashier.');
+
+      // Refresh promissory notes
+      const pnResp = await studentService.getPromissoryNotes(currentEnrollment.id);
+      setPromissoryNotes(pnResp?.data || []);
+
+      // Close dialog and reset
+      setPromissoryDialogOpen(false);
+      setPromissoryPeriod(null);
+      setPromissoryFile(null);
+      setPromissoryDate('');
+      setPromissoryReason('');
+      setPromissoryAmount(0);
+    } catch (error: any) {
+      alert(error.message || 'Failed to submit promissory note');
+    } finally {
+      setSubmittingPromissory(false);
+    }
+  };
+
+  const getPromissoryNoteForPeriod = (period: string) => {
+    return promissoryNotes.find((pn: any) => pn.period === period && (pn.status === 'Pending' || pn.status === 'Approved'));
+  };
+
   // Payment Form Component
   const PaymentForm = ({ 
     enrollment, 
@@ -1129,13 +1354,18 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
     installmentPeriod?: string;
     overrideAmount?: number;
   }) => {
-    const [paymentType, setPaymentType] = useState('full'); // 'full' or 'partial'
+    const [paymentType, setPaymentType] = useState('full'); // 'full', 'partial', or 'promissory'
     const [paymentMethod, setPaymentMethod] = useState('');
     const [referenceNumber, setReferenceNumber] = useState('');
     const [receiptFile, setReceiptFile] = useState<File | null>(null);
     const [enteredPaymentAmount, setEnteredPaymentAmount] = useState('');
     const [uploading, setUploading] = useState(false);
     const [showBankDetails, setShowBankDetails] = useState(false);
+
+    // Local promissory note state (kept local to avoid parent re-render on every keystroke)
+    const [localPnDate, setLocalPnDate] = useState('');
+    const [localPnReason, setLocalPnReason] = useState('');
+    const [localPnFile, setLocalPnFile] = useState<File | null>(null);
 
     // Calculate installment amounts
     const totalAmount = enrollment.total_amount || 0;
@@ -1343,11 +1573,149 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                   </div>
                 </div>
               </div>
+
+              <div className="flex items-center p-4 border rounded-lg cursor-pointer hover:bg-amber-50" 
+                onClick={() => setPaymentType('promissory')}
+              >
+                <input 
+                  type="radio" 
+                  name="paymentType" 
+                  value="promissory"
+                  checked={paymentType === 'promissory'}
+                  onChange={() => setPaymentType('promissory')}
+                  className="w-4 h-4"
+                />
+                <div className="ml-4 flex-1">
+                  <p className="font-medium">Promissory Note</p>
+                  <p className="text-sm text-slate-500">Can't pay right now? Submit a promissory note to request a payment extension</p>
+                  <div className="mt-2 space-y-1 text-sm">
+                    <p className="text-amber-600 font-semibold">Total: ₱{totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xs text-slate-500">Download the form, fill it out, and upload the signed copy for approval</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Payment Details */}
+        {/* Promissory Note Flow - Only show when promissory type is selected */}
+        {paymentType === 'promissory' && !isRemainingInstallment && (
+          <div className="space-y-4 mb-4">
+            {(() => {
+              const existingNote = getPromissoryNoteForPeriod('Full Payment');
+              if (existingNote) {
+                return (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                    <FileText className="h-8 w-8 text-amber-600 mx-auto mb-2" />
+                    <p className="font-medium text-amber-900">Promissory Note Already Submitted</p>
+                    <Badge className={`mt-2 text-xs ${
+                      existingNote.status === 'Approved' ? 'bg-green-100 text-green-800' : 
+                      existingNote.status === 'Rejected' ? 'bg-red-100 text-red-800' :
+                      'bg-amber-100 text-amber-800'
+                    }`}>
+                      Status: {existingNote.status}
+                    </Badge>
+                    {existingNote.status === 'Approved' && existingNote.promised_date && (
+                      <p className="text-sm text-green-700 mt-2">Approved — pay by {parseUTCDate(existingNote.promised_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                    )}
+                    {existingNote.status === 'Rejected' && (
+                      <p className="text-sm text-red-600 mt-2">Rejected — you may submit a new one or proceed with payment.</p>
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <>
+                  {/* Step 1 */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-blue-900 mb-2">Step 1: Download & Print the Template</p>
+                    <p className="text-xs text-blue-700 mb-3">Download the promissory note template, print it, fill in the details, and sign it.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                      onClick={() => generatePromissoryNoteTemplate('Full Payment', totalAmount, 'As assessed')}
+                    >
+                      <Printer className="h-4 w-4 mr-2" />
+                      Download Template
+                    </Button>
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-amber-900 mb-3">Step 2: Fill in Details</p>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">Promised Payment Date <span className="text-red-500">*</span></Label>
+                        <Input
+                          type="date"
+                          value={localPnDate}
+                          onChange={(e) => setLocalPnDate(e.target.value)}
+                          min={new Date().toISOString().split('T')[0]}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">Reason for Extension</Label>
+                        <textarea
+                          value={localPnReason}
+                          onChange={(e) => setLocalPnReason(e.target.value)}
+                          placeholder="Briefly explain why you need a payment extension..."
+                          className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-green-900 mb-2">Step 3: Upload Signed Promissory Note <span className="text-red-500">*</span></p>
+                    <p className="text-xs text-green-700 mb-3">Scan or take a photo of the filled-out and signed promissory note.</p>
+                    <Input
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={(e) => setLocalPnFile(e.target.files?.[0] || null)}
+                      className="text-sm"
+                    />
+                    {localPnFile && (
+                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> {localPnFile.name}
+                      </p>
+                    )}
+                  </div>
+
+                  <Button
+                    className="w-full"
+                    style={{ backgroundColor: '#d97706', color: '#fff' }}
+                    disabled={submittingPromissory || !localPnFile || !localPnDate}
+                    onClick={() => {
+                      handleSubmitPromissoryNote({ period: 'Full Payment', amount: totalAmount, date: localPnDate, reason: localPnReason, file: localPnFile });
+                    }}
+                  >
+                    {submittingPromissory ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Submit Promissory Note
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-xs text-slate-500 text-center">
+                    Your promissory note will be reviewed by the Cashier's Office. You will be notified once reviewed.
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Payment Details - Hide when promissory note is selected */}
+        {paymentType !== 'promissory' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1388,13 +1756,13 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
               <div className="mt-2 p-3 bg-blue-50 rounded border border-blue-200">
                 <p className="text-sm font-medium text-blue-900">Balance Summary:</p>
                 <p className="text-sm text-blue-700 mt-1">
-                  {isPenaltyPayment ? 'Penalty Amount' : 'Total Amount'}: ₱{(isPenaltyPayment ? paymentAmount : totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  {isPenaltyPayment ? 'Penalty Amount' : paymentType === 'partial' ? `${paymentPeriod} Amount Due` : 'Total Amount'}: ₱{(isPenaltyPayment ? paymentAmount : paymentType === 'partial' ? paymentAmount : totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-sm text-blue-700">
                   Amount Paying: ₱{parseFloat(enteredPaymentAmount || '0').toLocaleString('en-US', { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-sm font-semibold text-blue-900 mt-1">
-                  Remaining Balance: ₱{Math.max((isPenaltyPayment ? paymentAmount : totalAmount) - parseFloat(enteredPaymentAmount || '0'), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  Remaining Balance: ₱{Math.max((isPenaltyPayment || paymentType === 'partial' ? paymentAmount : totalAmount) - parseFloat(enteredPaymentAmount || '0'), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                 </p>
               </div>
             )}
@@ -1429,6 +1797,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
             Your payment will be reviewed by the cashier. You will be notified once verified.
           </p>
         </div>
+        )}
 
         {/* Installment Payment Schedule - Show if partial payment was selected */}
         {paymentType === 'partial' && installmentSchedule.length > 0 && (
@@ -1687,79 +2056,136 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
           <Card className="border border-blue-200 bg-blue-50 p-6 shadow-lg">
             <h3 className="text-lg font-semibold text-blue-900 mb-4">Remaining Installment Payments</h3>
             <p className="text-sm text-slate-600 mb-4">You have paid the down payment. Below is your remaining balance to pay:</p>
-            <div className="space-y-4">
-              {installmentSchedule.map((payment: any, idx: number) => {
-                const periodOffset: Record<string, number> = { 'Prelim Period': 1, 'Midterm Period': 2, 'Finals Period': 3 };
-                const enrollDate = new Date(currentEnrollment?.enrollment_date || currentEnrollment?.created_at);
-                const dueDate = new Date(enrollDate);
-                dueDate.setMonth(dueDate.getMonth() + (periodOffset[payment.period] ?? (idx + 1)));
-                const isOverdue = new Date() > dueDate && payment.status !== 'Approved';
-                // Check if any previous period has an unpaid penalty (blocks paying next periods)
-                const hasUnpaidPriorPenalty = installmentSchedule.slice(0, idx).some((prev: any) => (prev.penalty_amount || 0) > 0);
-                const canPayPeriod = !hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected');
-                // Auto-calculated penalty for overdue periods not yet submitted
-                const autoCalculatedPenalty = (isOverdue && payment.status === 'Not Started' && penaltyFeeConfig > 0) ? penaltyFeeConfig : 0;
-                // Display penalty: from DB if submitted, auto-calculated if not yet submitted and overdue
-                const displayPenalty = payment.penalty_amount || autoCalculatedPenalty;
-                return (
-                <React.Fragment key={`${payment.period}-${idx}`}>
-                  <div className="bg-white rounded-lg p-4 flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="font-semibold text-slate-900">{payment.period} Payment</p>
-                      <p className="text-sm text-slate-600">Amount Due: ₱{(payment.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      {displayPenalty > 0 && (
-                        <p className="text-sm text-red-600 font-medium">+ Late Penalty Fee: ₱{displayPenalty.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      )}
-                      {displayPenalty > 0 && (
-                        <p className="text-sm font-semibold text-slate-900">Total: ₱{((payment.amount || 0) + displayPenalty).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      )}
-                      <p className={`text-xs mt-1 ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-500'}`}>Due Date: {dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{isOverdue ? ' (Overdue)' : ''}</p>
-                      {isOverdue && payment.status === 'Not Started' && penaltyFeeConfig > 0 && (
-                        <p className="text-xs text-red-500 mt-1">⚠ A late penalty fee of ₱{penaltyFeeConfig.toLocaleString('en-US', { minimumFractionDigits: 2 })} will be applied to this payment</p>
-                      )}
-                      <Badge className={`mt-2 ${
-                        payment.status === 'Approved' ? 'bg-green-100 text-green-800' :
-                        payment.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                        payment.status === 'Rejected' ? 'bg-red-100 text-red-800' :
-                        'bg-slate-100 text-slate-800'
-                      }`}>
-                        {payment.status}
-                      </Badge>
-                      {payment.status === 'Rejected' && (
-                        <p className="text-xs text-red-600 mt-2">Please resubmit your payment</p>
-                      )}
-                      {hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected') && (
-                        <p className="text-xs text-amber-600 mt-2">Pay outstanding penalty fees first before paying this period.</p>
-                      )}
-                    </div>
-                    {canPayPeriod && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setPenaltyPaymentAmount(null);
-                          setSelectedInstallmentPeriod(payment.period);
-                          setInstallmentPaymentOpen(true);
-                        }}
-                      >
-                        Pay Now
-                      </Button>
-                    )}
-                  </div>
-                  {(payment.penalty_amount || 0) > 0 && payment.status !== 'Not Started' && (
-                  <div className="rounded-lg p-4 flex items-center justify-between ml-4 bg-red-50 border border-red-200">
-                    <div className="flex-1">
-                      <p className="font-semibold text-red-800">Late Penalty Fee (included in payment)</p>
-                      <p className="text-sm font-semibold text-red-700">₱{(payment.penalty_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-                  )}
-                </React.Fragment>
-                );
-              })}
+            <div className="bg-white rounded-lg border border-slate-200" style={{ overflowX: 'auto' }}>
+              <table className="w-full" style={{ minWidth: '750px' }}>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Period</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Amount Due</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Due Date</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Status</th>
+                    <th className="text-center text-xs font-semibold text-slate-600 uppercase px-4 py-3">Action</th>
+                    <th className="text-center text-xs font-semibold text-slate-600 uppercase px-4 py-3">Promissory Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {installmentSchedule.map((payment: any, idx: number) => {
+                    const periodOffset: Record<string, number> = { 'Prelim Period': 1, 'Midterm Period': 2, 'Finals Period': 3 };
+                    const enrollDate = parseUTCDate(currentEnrollment?.enrollment_date || currentEnrollment?.created_at);
+                    const dueDate = new Date(enrollDate);
+                    dueDate.setMonth(dueDate.getMonth() + (periodOffset[payment.period] ?? (idx + 1)));
+                    const isOverdue = new Date() > dueDate && payment.status !== 'Approved';
+                    const hasUnpaidPriorPenalty = installmentSchedule.slice(0, idx).some((prev: any) => (prev.penalty_amount || 0) > 0);
+                    const canPayPeriod = !hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected');
+                    const displayPenalty = payment.penalty_amount || 0;
+                    const existingNote = getPromissoryNoteForPeriod(payment.period);
+                    return (
+                      <tr key={`${payment.period}-${idx}`} className={`border-b border-slate-100 ${isOverdue ? 'bg-red-50' : ''}`}>
+                        {/* Period */}
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900 text-sm">{payment.period}</p>
+                        </td>
+                        {/* Amount */}
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-slate-900">₱{(payment.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                          {displayPenalty > 0 && (
+                            <p className="text-xs text-red-600">+ Penalty: ₱{displayPenalty.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                          )}
+                        </td>
+                        {/* Due Date */}
+                        <td className="px-4 py-3">
+                          <p className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-700'}`}>
+                            {dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </p>
+                          {isOverdue && <p className="text-xs text-red-500 font-medium">Overdue</p>}
+                        </td>
+                        {/* Status */}
+                        <td className="px-4 py-3">
+                          <Badge className={`text-xs ${
+                            payment.status === 'Approved' ? 'bg-green-100 text-green-800' :
+                            payment.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            payment.status === 'Rejected' ? 'bg-red-100 text-red-800' :
+                            'bg-slate-100 text-slate-800'
+                          }`}>
+                            {payment.status}
+                          </Badge>
+                          {payment.status === 'Rejected' && (
+                            <p className="text-xs text-red-600 mt-1">Resubmit payment</p>
+                          )}
+                          {hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected') && (
+                            <p className="text-xs text-amber-600 mt-1">Pay prior penalties first</p>
+                          )}
+                        </td>
+                        {/* Action */}
+                        <td className="px-4 py-3 text-center">
+                          {canPayPeriod && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPenaltyPaymentAmount(null);
+                                setSelectedInstallmentPeriod(payment.period);
+                                setInstallmentPaymentOpen(true);
+                              }}
+                            >
+                              Pay Now
+                            </Button>
+                          )}
+                        </td>
+                        {/* Promissory Note Column */}
+                        <td className="px-4 py-3 text-center">
+                          {existingNote ? (
+                            <div>
+                              <Badge className={`text-xs ${
+                                existingNote.status === 'Approved' ? 'bg-green-100 text-green-800' : 
+                                existingNote.status === 'Rejected' ? 'bg-red-100 text-red-800' :
+                                'bg-amber-100 text-amber-800'
+                              }`}>
+                                <FileText className="h-3 w-3 mr-1" />
+                                {existingNote.status}
+                              </Badge>
+                              {existingNote.status === 'Approved' && existingNote.promised_date && (
+                                <p className="text-xs text-green-700 mt-1">Pay by: {parseUTCDate(existingNote.promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                              )}
+                            </div>
+                          ) : (canPayPeriod || (isOverdue && payment.status === 'Not Started')) ? (
+                            <div className="flex flex-col gap-1 items-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-blue-700 hover:text-blue-900 h-7 px-2"
+                                onClick={() => generatePromissoryNoteTemplate(payment.period, payment.amount || 0, dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))}
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Download
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs text-amber-700 border-amber-300 hover:bg-amber-50 h-7 px-2"
+                                onClick={() => {
+                                  setPromissoryPeriod(payment.period);
+                                  setPromissoryAmount(payment.amount || 0);
+                                  setPromissoryDialogOpen(true);
+                                }}
+                              >
+                                <Upload className="h-3 w-3 mr-1" />
+                                Upload
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </Card>
         )}
+
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card className="p-4 shadow-sm">
@@ -1844,8 +2270,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
       studentProfile?.birth_date,
       studentProfile?.gender,
       studentProfile?.course,
-      studentProfile?.year_level,
-      studentProfile?.section
+      studentProfile?.year_level
     ];
     
     const isProfileIncomplete = requiredProfileFields.some(field => !field || field === '');
@@ -2413,28 +2838,91 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                 acceptedFormats=".pdf,.doc,.docx,.jpg,.jpeg,.png"
               />
               
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                <h4 className="mb-2">Previous Term Data</h4>
-                <div className="space-y-1 text-sm">
-                  <p><span className="text-slate-600">Term:</span> 1st Semester 2023-2024</p>
-                  <p><span className="text-slate-600">Program:</span> {studentProfile?.course || 'BSIT'}</p>
-                  <p><span className="text-slate-600">Year Level:</span> 2nd Year</p>
-                  <p>
-                    <span className="text-slate-600">GPA:</span> {
-                      (() => {
-                        if (!curriculumData?.subjects) return '—';
-                        const passedGrades = curriculumData.subjects
-                          .filter((s: any) => s.remarks === 'PASSED' && s.grade)
-                          .map((s: any) => parseFloat(s.grade))
-                          .filter((g: number) => !isNaN(g));
-                        if (passedGrades.length === 0) return '—';
-                        const gpa = passedGrades.reduce((a: number, b: number) => a + b, 0) / passedGrades.length;
-                        return gpa.toFixed(2);
-                      })()
-                    }
-                  </p>
-                </div>
-              </div>
+              {(() => {
+                // Compute previous semester from the current enrollment or active period
+                const curYearLevel = currentEnrollment?.year_level || studentProfile?.year_level || 1;
+                // Semester is stored as short format: '1st', '2nd', '3rd'
+                const curSemester = currentEnrollment?.semester || semester || '1st';
+                const curSchoolYear = currentEnrollment?.school_year || schoolYear || '';
+
+                // Determine previous semester/year
+                let prevSem = '';
+                let prevYearLevel = curYearLevel;
+                let prevSchoolYear = curSchoolYear;
+
+                if (curSemester === '1st') {
+                  // Previous semester was 3rd of the previous school year, previous year level
+                  prevSem = '3rd';
+                  prevYearLevel = Math.max(1, curYearLevel - 1);
+                  const yearParts = curSchoolYear.split('-').map(Number);
+                  if (yearParts.length === 2 && yearParts[0] > 0) {
+                    prevSchoolYear = `${yearParts[0] - 1}-${yearParts[1] - 1}`;
+                  }
+                } else if (curSemester === '2nd') {
+                  // Previous semester was 1st of the same school year, same year level
+                  prevSem = '1st';
+                  prevYearLevel = curYearLevel;
+                  prevSchoolYear = curSchoolYear;
+                } else {
+                  // curSemester === '3rd' → Previous was 2nd of the same school year, same year level
+                  prevSem = '2nd';
+                  prevYearLevel = curYearLevel;
+                  prevSchoolYear = curSchoolYear;
+                }
+
+                const yearLevelLabels: Record<number, string> = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
+                const prevYearLevelLabel = yearLevelLabels[prevYearLevel] || `Year ${prevYearLevel}`;
+
+                // Find the specific previous enrollment matching the computed previous period
+                const prevEnrollment = enrollments.find((e: any) =>
+                  e.status === 'Enrolled' &&
+                  e.school_year === prevSchoolYear &&
+                  e.semester === prevSem
+                );
+                const displaySem = prevEnrollment?.semester || prevSem;
+                const displaySY = prevEnrollment?.school_year || prevSchoolYear;
+                const displayYL = prevEnrollment?.year_level
+                  ? (yearLevelLabels[prevEnrollment.year_level] || `Year ${prevEnrollment.year_level}`)
+                  : prevYearLevelLabel;
+
+                // Calculate GPA from previous semester subjects only
+                const prevTermGPA = (() => {
+                  if (!curriculumData?.subjects) return '—';
+                  const targetYL = prevEnrollment?.year_level || prevYearLevel;
+                  const targetSem = displaySem;
+
+                  const prevSubjects = curriculumData.subjects.filter((s: any) =>
+                    s.year_level === targetYL && s.semester === targetSem && s.remarks === 'PASSED' && s.grade
+                  );
+
+                  if (prevSubjects.length === 0) {
+                    // Fall back: show overall GPA for the previous year level
+                    const yearSubjects = curriculumData.subjects.filter((s: any) =>
+                      s.year_level === targetYL && s.remarks === 'PASSED' && s.grade
+                    );
+                    if (yearSubjects.length === 0) return '—';
+                    const grades = yearSubjects.map((s: any) => parseFloat(s.grade)).filter((g: number) => !isNaN(g));
+                    if (grades.length === 0) return '—';
+                    return (grades.reduce((a: number, b: number) => a + b, 0) / grades.length).toFixed(2);
+                  }
+
+                  const grades = prevSubjects.map((s: any) => parseFloat(s.grade)).filter((g: number) => !isNaN(g));
+                  if (grades.length === 0) return '—';
+                  return (grades.reduce((a: number, b: number) => a + b, 0) / grades.length).toFixed(2);
+                })();
+
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <h4 className="mb-2">Previous Semester Data</h4>
+                    <div className="space-y-1 text-sm">
+                      <p><span className="text-slate-600">Semester:</span> {displaySem} Semester — {displaySY}</p>
+                      <p><span className="text-slate-600">Program:</span> {studentProfile?.course || 'N/A'}</p>
+                      <p><span className="text-slate-600">Year Level:</span> {displayYL}</p>
+                      <p><span className="text-slate-600">GPA:</span> {prevTermGPA}</p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-6 mb-4">
                 <h4 className="font-medium text-amber-900 mb-2">Submission Options</h4>
@@ -2963,11 +3451,11 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                         </Badge>
                       </div>
                       <div className="text-xs text-slate-600 mt-1">
-                        Submitted: {new Date(p.ts || p.created_at).toLocaleString()}
+                        Submitted: {parseUTCDate(p.ts || p.created_at).toLocaleString()}
                       </div>
                       {(p.approved_at || p.approved_by) && (
                         <div className="text-xs text-slate-600">
-                          Approved: {new Date(p.approved_at).toLocaleString()} {p.approved_by ? `by ${p.approved_by}` : ''}
+                          Approved: {parseUTCDate(p.approved_at).toLocaleString()} {p.approved_by ? `by ${p.approved_by}` : ''}
                         </div>
                       )}
                       {p.reference && (
@@ -3008,76 +3496,132 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
           <Card className="border border-blue-200 bg-blue-50 p-6 shadow-lg mt-6">
             <h3 className="text-lg font-semibold text-blue-900 mb-4">Remaining Installment Payments</h3>
             <p className="text-sm text-slate-600 mb-4">You have paid the down payment. Below is your remaining balance to pay:</p>
-            <div className="space-y-4">
-              {installmentSchedule.map((payment: any, idx: number) => {
-                const periodOffset: Record<string, number> = { 'Prelim Period': 1, 'Midterm Period': 2, 'Finals Period': 3 };
-                const enrollDate = new Date(currentEnrollment?.enrollment_date || currentEnrollment?.created_at);
-                const dueDate = new Date(enrollDate);
-                dueDate.setMonth(dueDate.getMonth() + (periodOffset[payment.period] ?? (idx + 1)));
-                const isOverdue = new Date() > dueDate && payment.status !== 'Approved';
-                // Check if any previous period has an unpaid penalty (blocks paying next periods)
-                const hasUnpaidPriorPenalty = installmentSchedule.slice(0, idx).some((prev: any) => (prev.penalty_amount || 0) > 0);
-                const canPayPeriod = !hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected');
-                // Auto-calculated penalty for overdue periods not yet submitted
-                const autoCalculatedPenalty = (isOverdue && payment.status === 'Not Started' && penaltyFeeConfig > 0) ? penaltyFeeConfig : 0;
-                // Display penalty: from DB if submitted, auto-calculated if not yet submitted and overdue
-                const displayPenalty = payment.penalty_amount || autoCalculatedPenalty;
-                return (
-                <React.Fragment key={`${payment.period}-${idx}`}>
-                  <div className="bg-white rounded-lg p-4 flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="font-semibold text-slate-900">{payment.period} Payment</p>
-                      <p className="text-sm text-slate-600">Amount Due: ₱{(payment.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      {displayPenalty > 0 && (
-                        <p className="text-sm text-red-600 font-medium">+ Late Penalty Fee: ₱{displayPenalty.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      )}
-                      {displayPenalty > 0 && (
-                        <p className="text-sm font-semibold text-slate-900">Total: ₱{((payment.amount || 0) + displayPenalty).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                      )}
-                      <p className={`text-xs mt-1 ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-500'}`}>Due Date: {dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}{isOverdue ? ' (Overdue)' : ''}</p>
-                      {isOverdue && payment.status === 'Not Started' && penaltyFeeConfig > 0 && (
-                        <p className="text-xs text-red-500 mt-1">⚠ A late penalty fee of ₱{penaltyFeeConfig.toLocaleString('en-US', { minimumFractionDigits: 2 })} will be applied to this payment</p>
-                      )}
-                      <Badge className={`mt-2 ${
-                        payment.status === 'Approved' ? 'bg-green-100 text-green-800' :
-                        payment.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                        payment.status === 'Rejected' ? 'bg-red-100 text-red-800' :
-                        'bg-slate-100 text-slate-800'
-                      }`}>
-                        {payment.status}
-                      </Badge>
-                      {payment.status === 'Rejected' && (
-                        <p className="text-xs text-red-600 mt-2">Please resubmit your payment</p>
-                      )}
-                      {hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected') && (
-                        <p className="text-xs text-amber-600 mt-2">Pay outstanding penalty fees first before paying this period.</p>
-                      )}
-                    </div>
-                    {canPayPeriod && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setPenaltyPaymentAmount(null);
-                          setSelectedInstallmentPeriod(payment.period);
-                          setInstallmentPaymentOpen(true);
-                        }}
-                      >
-                        Pay Now
-                      </Button>
-                    )}
-                  </div>
-                  {(payment.penalty_amount || 0) > 0 && payment.status !== 'Not Started' && (
-                  <div className="rounded-lg p-4 flex items-center justify-between ml-4 bg-red-50 border border-red-200">
-                    <div className="flex-1">
-                      <p className="font-semibold text-red-800">Late Penalty Fee (included in payment)</p>
-                      <p className="text-sm font-semibold text-red-700">₱{(payment.penalty_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-                  )}
-                </React.Fragment>
-                );
-              })}
+            <div className="bg-white rounded-lg border border-slate-200" style={{ overflowX: 'auto' }}>
+              <table className="w-full" style={{ minWidth: '750px' }}>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Period</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Amount Due</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Due Date</th>
+                    <th className="text-left text-xs font-semibold text-slate-600 uppercase px-4 py-3">Status</th>
+                    <th className="text-center text-xs font-semibold text-slate-600 uppercase px-4 py-3">Action</th>
+                    <th className="text-center text-xs font-semibold text-slate-600 uppercase px-4 py-3">Promissory Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {installmentSchedule.map((payment: any, idx: number) => {
+                    const periodOffset: Record<string, number> = { 'Prelim Period': 1, 'Midterm Period': 2, 'Finals Period': 3 };
+                    const enrollDate = parseUTCDate(currentEnrollment?.enrollment_date || currentEnrollment?.created_at);
+                    const dueDate = new Date(enrollDate);
+                    dueDate.setMonth(dueDate.getMonth() + (periodOffset[payment.period] ?? (idx + 1)));
+                    const isOverdue = new Date() > dueDate && payment.status !== 'Approved';
+                    const hasUnpaidPriorPenalty = installmentSchedule.slice(0, idx).some((prev: any) => (prev.penalty_amount || 0) > 0);
+                    const canPayPeriod = !hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected');
+                    const displayPenalty = payment.penalty_amount || 0;
+                    const existingNote = getPromissoryNoteForPeriod(payment.period);
+                    return (
+                      <tr key={`${payment.period}-${idx}`} className={`border-b border-slate-100 ${isOverdue ? 'bg-red-50' : ''}`}>
+                        {/* Period */}
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900 text-sm">{payment.period}</p>
+                        </td>
+                        {/* Amount */}
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-slate-900">₱{(payment.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                          {displayPenalty > 0 && (
+                            <p className="text-xs text-red-600">+ Penalty: ₱{displayPenalty.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                          )}
+                        </td>
+                        {/* Due Date */}
+                        <td className="px-4 py-3">
+                          <p className={`text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-slate-700'}`}>
+                            {dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </p>
+                          {isOverdue && <p className="text-xs text-red-500 font-medium">Overdue</p>}
+                        </td>
+                        {/* Status */}
+                        <td className="px-4 py-3">
+                          <Badge className={`text-xs ${
+                            payment.status === 'Approved' ? 'bg-green-100 text-green-800' :
+                            payment.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
+                            payment.status === 'Rejected' ? 'bg-red-100 text-red-800' :
+                            'bg-slate-100 text-slate-800'
+                          }`}>
+                            {payment.status}
+                          </Badge>
+                          {payment.status === 'Rejected' && (
+                            <p className="text-xs text-red-600 mt-1">Resubmit payment</p>
+                          )}
+                          {hasUnpaidPriorPenalty && (payment.status === 'Not Started' || payment.status === 'Rejected') && (
+                            <p className="text-xs text-amber-600 mt-1">Pay prior penalties first</p>
+                          )}
+                        </td>
+                        {/* Action */}
+                        <td className="px-4 py-3 text-center">
+                          {canPayPeriod && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPenaltyPaymentAmount(null);
+                                setSelectedInstallmentPeriod(payment.period);
+                                setInstallmentPaymentOpen(true);
+                              }}
+                            >
+                              Pay Now
+                            </Button>
+                          )}
+                        </td>
+                        {/* Promissory Note Column */}
+                        <td className="px-4 py-3 text-center">
+                          {existingNote ? (
+                            <div>
+                              <Badge className={`text-xs ${
+                                existingNote.status === 'Approved' ? 'bg-green-100 text-green-800' : 
+                                existingNote.status === 'Rejected' ? 'bg-red-100 text-red-800' :
+                                'bg-amber-100 text-amber-800'
+                              }`}>
+                                <FileText className="h-3 w-3 mr-1" />
+                                {existingNote.status}
+                              </Badge>
+                              {existingNote.status === 'Approved' && existingNote.promised_date && (
+                                <p className="text-xs text-green-700 mt-1">Pay by: {parseUTCDate(existingNote.promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                              )}
+                            </div>
+                          ) : (canPayPeriod || (isOverdue && payment.status === 'Not Started')) ? (
+                            <div className="flex flex-col gap-1 items-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-blue-700 hover:text-blue-900 h-7 px-2"
+                                onClick={() => generatePromissoryNoteTemplate(payment.period, payment.amount || 0, dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }))}
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Download
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs text-amber-700 border-amber-300 hover:bg-amber-50 h-7 px-2"
+                                onClick={() => {
+                                  setPromissoryPeriod(payment.period);
+                                  setPromissoryAmount(payment.amount || 0);
+                                  setPromissoryDialogOpen(true);
+                                }}
+                              >
+                                <Upload className="h-3 w-3 mr-1" />
+                                Upload
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </Card>
         )}
@@ -3771,7 +4315,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                       <p className="text-xs text-slate-500">
                         {req.hard_copy_submitted ? (
                           req.hard_copy_received_at
-                            ? <span className="text-green-600">✓ Received by registrar on {new Date(req.hard_copy_received_at).toLocaleDateString()}</span>
+                            ? <span className="text-green-600">✓ Received by registrar on {parseUTCDate(req.hard_copy_received_at).toLocaleDateString()}</span>
                             : <span className="text-amber-600">Tagged as submitted — awaiting registrar confirmation</span>
                         ) : (
                           <span className="text-slate-400">Hard copy not yet submitted</span>
@@ -4058,7 +4602,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                           </div>
                           <p className="text-sm text-slate-600">{notice.message}</p>
                           <p className="text-xs text-slate-500 mt-1">
-                            {notice.created_at ? new Date(notice.created_at).toLocaleString() : 'Just now'}
+                            {notice.created_at ? parseUTCDate(notice.created_at).toLocaleString() : 'Just now'}
                           </p>
                         </div>
                         <div className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ${
@@ -4110,7 +4654,7 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                             <div className="flex justify-between items-start">
                               <div>
                                 <div className="font-medium">{p.method || p.reference || 'Payment'}</div>
-                                <div className="text-xs text-slate-500">{new Date(p.ts || p.created_at).toLocaleString()}</div>
+                                <div className="text-xs text-slate-500">{parseUTCDate(p.ts || p.created_at).toLocaleString()}</div>
                                 {p.approved_by && (
                                   <div className="text-xs text-slate-500">Approved by: {p.approved_by}</div>
                                 )}
@@ -4220,6 +4764,137 @@ export default function StudentDashboard({ onLogout }: StudentDashboardProps) {
                     overrideAmount={penaltyPaymentAmount || undefined}
                   />
                 )}
+              </DialogContent>
+            </Dialog>
+
+            {/* Promissory Note Dialog */}
+            <Dialog open={promissoryDialogOpen} onOpenChange={(open) => {
+              setPromissoryDialogOpen(open);
+              if (!open) {
+                setPromissoryPeriod(null);
+                setPromissoryFile(null);
+                setPromissoryDate('');
+                setPromissoryReason('');
+                setPromissoryAmount(0);
+              }
+            }}>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-amber-600" />
+                    Submit Promissory Note
+                  </DialogTitle>
+                  <DialogDescription>
+                    Submit a promissory note for <strong>{promissoryPeriod}</strong> if you cannot pay by the due date.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 mt-2">
+                  {/* Step 1: Download template */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm font-medium text-blue-900 mb-2">Step 1: Download & Print the Template</p>
+                    <p className="text-xs text-blue-700 mb-2">Download the promissory note template, print it, fill in the details, and sign it.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100"
+                      onClick={() => {
+                        if (promissoryPeriod && currentEnrollment) {
+                          const periodOffset: Record<string, number> = { 'Prelim Period': 1, 'Midterm Period': 2, 'Finals Period': 3 };
+                          const enrollDate = parseUTCDate(currentEnrollment.enrollment_date || currentEnrollment.created_at);
+                          const dueDate = new Date(enrollDate);
+                          dueDate.setMonth(dueDate.getMonth() + (periodOffset[promissoryPeriod] ?? 1));
+                          generatePromissoryNoteTemplate(promissoryPeriod, promissoryAmount, dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
+                        }
+                      }}
+                    >
+                      <Printer className="h-4 w-4 mr-2" />
+                      Download Template
+                    </Button>
+                  </div>
+
+                  {/* Step 2: Fill in details */}
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-sm font-medium text-amber-900 mb-2">Step 2: Fill in Details</p>
+
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">Amount Due</Label>
+                        <Input
+                          value={`₱${promissoryAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+                          readOnly
+                          className="bg-slate-50 cursor-default mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">Promised Payment Date <span className="text-red-500">*</span></Label>
+                        <Input
+                          type="date"
+                          value={promissoryDate}
+                          onChange={(e) => setPromissoryDate(e.target.value)}
+                          min={new Date().toISOString().split('T')[0]}
+                          className="mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs font-medium text-slate-700">Reason for Extension</Label>
+                        <textarea
+                          value={promissoryReason}
+                          onChange={(e) => setPromissoryReason(e.target.value)}
+                          placeholder="Briefly explain why you need an extension..."
+                          className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 3: Upload signed document */}
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <p className="text-sm font-medium text-green-900 mb-2">Step 3: Upload Signed Promissory Note <span className="text-red-500">*</span></p>
+                    <p className="text-xs text-green-700 mb-2">Scan or take a photo of the filled-out and signed promissory note and upload it here.</p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        onChange={(e) => setPromissoryFile(e.target.files?.[0] || null)}
+                        className="text-sm"
+                      />
+                    </div>
+                    {promissoryFile && (
+                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> {promissoryFile.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <DialogFooter className="mt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setPromissoryDialogOpen(false)}
+                    disabled={submittingPromissory}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSubmitPromissoryNote}
+                    disabled={submittingPromissory || !promissoryFile || !promissoryDate}
+                    style={{ backgroundColor: '#d97706', color: '#fff' }}
+                  >
+                    {submittingPromissory ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Submit Promissory Note
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
 

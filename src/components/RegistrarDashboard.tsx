@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_SERVER_URL } from '../utils/api';
+import { parseUTCDate } from '../utils/dateUtils';
 import { Button } from './ui/button';
 import { 
   LogOut, 
@@ -257,7 +258,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                 semester: grade.semester,
                 subjects: [],
                 status: 'Submitted',
-                date: new Date(grade.updated_at).toLocaleDateString(),
+                date: parseUTCDate(grade.updated_at).toLocaleDateString(),
               });
             }
             const item = studentMap.get(key)!;
@@ -284,7 +285,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                 subjects: [],
                 approved_by: grade.approved_by,
                 status: 'Approved',
-                date: new Date(grade.updated_at).toLocaleDateString(),
+                date: parseUTCDate(grade.updated_at).toLocaleDateString(),
               });
             }
             const item = studentMap.get(key)!;
@@ -677,21 +678,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
   const formatTimeAgo = (dateString: string) => {
     if (!dateString) return 'N/A';
     
-    // Parse the date - handle both ISO format and SQLite datetime format
-    let date: Date;
-    
-    // Check if it's SQLite datetime format (YYYY-MM-DD HH:MM:SS) vs ISO format
-    if (dateString.includes('T')) {
-      // ISO format - parse directly
-      date = new Date(dateString);
-    } else if (dateString.includes(' ')) {
-      // SQLite datetime format - treat as UTC
-      date = new Date(dateString + 'Z');
-    } else {
-      // Try parsing as-is
-      date = new Date(dateString);
-    }
-    
+    const date = parseUTCDate(dateString);
     const now = new Date();
     
     // If the date is invalid, return N/A
@@ -2058,7 +2045,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                                 </div>
                                 <div className="text-right shrink-0 ml-4">
                                   <p className="text-xs text-slate-500">{entry.performed_by_name}</p>
-                                  <p className="text-[10px] text-slate-400">{new Date(entry.created_at + 'Z').toLocaleString('en-US', { 
+                                  <p className="text-[10px] text-slate-400">{parseUTCDate(entry.created_at).toLocaleString('en-US', { 
                                     year: 'numeric', 
                                     month: '2-digit', 
                                     day: '2-digit', 
@@ -2410,7 +2397,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                                   <p className="text-sm font-medium text-slate-800">{req.requirement_name}</p>
                                   <p className="text-xs text-slate-500 mt-0.5">
                                     {req.hard_copy_received_at
-                                      ? <span className="text-green-600">Received on {new Date(req.hard_copy_received_at).toLocaleDateString()}</span>
+                                      ? <span className="text-green-600">Received on {parseUTCDate(req.hard_copy_received_at).toLocaleDateString()}</span>
                                       : Number(req.hard_copy_submitted) === 1
                                         ? <span className="text-amber-600">Student tagged as submitted — awaiting confirmation</span>
                                         : <span className="text-slate-500">Hard copy not yet received</span>
@@ -3199,7 +3186,7 @@ export default function RegistrarDashboard({ onLogout }: RegistrarDashboardProps
                           {doc.document_type || `Document ${idx + 1}`}
                         </p>
                         <p className="text-xs text-slate-500 mt-1">
-                          Uploaded: {doc.upload_date ? new Date(doc.upload_date).toLocaleDateString() : 'N/A'}
+                          Uploaded: {doc.upload_date ? parseUTCDate(doc.upload_date).toLocaleDateString() : 'N/A'}
                         </p>
                       </div>
                       <button

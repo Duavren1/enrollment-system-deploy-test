@@ -10,6 +10,15 @@ class GradesService {
     }
   }
 
+  async rejectGrade(enrollmentSubjectId: number, remarks?: string): Promise<any> {
+    try {
+      const response = await api.post(`/grades/${enrollmentSubjectId}/reject`, { remarks });
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
   async getStudentGrades(studentId: string, filters?: {
     school_year?: string;
     semester?: string;

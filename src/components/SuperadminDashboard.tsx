@@ -49,6 +49,7 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { superadminService } from '../services/superadmin.service';
+import { parseUTCDate } from '../utils/dateUtils';
 
 interface SuperadminDashboardProps {
   onLogout: () => void;
@@ -99,6 +100,11 @@ export default function SuperadminDashboard({ onLogout }: SuperadminDashboardPro
         const statsResponse = await superadminService.getDashboardStats();
         if (statsResponse.success) {
           setDashboardStats(statsResponse.data);
+        }
+        // Also fetch users for the System Users card on Dashboard
+        const usersResponse = await superadminService.getAllUsers();
+        if (usersResponse.success) {
+          setUsers(usersResponse.data || []);
         }
       } else if (activeSection === 'User Management') {
         const usersResponse = await superadminService.getAllUsers();
@@ -189,7 +195,7 @@ export default function SuperadminDashboard({ onLogout }: SuperadminDashboardPro
 
   const formatTimeAgo = (dateString: string) => {
     if (!dateString) return 'Never';
-    const date = new Date(dateString);
+    const date = parseUTCDate(dateString);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -421,7 +427,7 @@ export default function SuperadminDashboard({ onLogout }: SuperadminDashboardPro
                       </div>
                       <div className="text-right text-xs text-slate-500">
                         <p>{log.username || 'system'}</p>
-                        <p>{new Date(log.created_at).toLocaleString()}</p>
+                        <p>{parseUTCDate(log.created_at).toLocaleString()}</p>
                       </div>
                     </div>
                   ))}

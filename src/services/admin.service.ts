@@ -42,6 +42,18 @@ class AdminService {
   }
 
   /**
+   * Get full curriculum with grades for a student (admin view)
+   */
+  async getStudentCurriculum(studentId: number): Promise<any> {
+    try {
+      const response = await api.get(`/admin/students/${studentId}/curriculum`);
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
+  /**
    * Create new student
    */
   async createStudent(studentData: {

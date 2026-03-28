@@ -1,6 +1,26 @@
 import api, { handleApiError } from '../utils/api';
 
 class MaintenanceService {
+  // Active Period
+  async getActivePeriod(): Promise<any> {
+    try {
+      const response = await api.get('/maintenance/active-period');
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
+  // Activate a semester in the database
+  async activateSemester(school_year_id: number, semester_number: number): Promise<any> {
+    try {
+      const response = await api.put('/maintenance/semesters/activate', { school_year_id, semester_number });
+      return response.data;
+    } catch (error) {
+      throw new Error(handleApiError(error));
+    }
+  }
+
   // Sections
   async getAllSections(filters?: {
     course?: string;

@@ -7,6 +7,7 @@ import {
   getGradesBySection,
   getPendingGrades,
   approveGrade,
+  rejectGrade,
   getApprovedGrades,
   getSubmittedGrades
 } from '../controllers/grades.controller';
@@ -24,5 +25,6 @@ router.get('/pending', authenticate, authorize('dean', 'admin', 'superadmin'), g
 router.get('/approved', authenticate, authorize('registrar', 'admin', 'superadmin'), getApprovedGrades);
 router.get('/submitted', authenticate, authorize('registrar', 'admin', 'superadmin'), getSubmittedGrades);
 router.post('/:id/approve', authenticate, authorize('dean', 'admin', 'superadmin'), (req, res, next) => require('../controllers/grades.controller').approveGrade(req, res).catch(next));
+router.post('/:id/reject', authenticate, authorize('dean', 'admin', 'superadmin'), (req, res, next) => require('../controllers/grades.controller').rejectGrade(req, res).catch(next));
 
 export default router;

@@ -2,6 +2,33 @@ import { Request, Response } from 'express';
 import { query, run, get } from '../database/connection';
 import { AuthRequest } from '../middleware/auth.middleware';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
+
+// Helper to log activities
+const logActivity = async (user: string, action: string, meta?: any) => {
+  try {
+    const dataDir = path.join(__dirname, '../../data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    const logsFile = path.join(dataDir, 'activityLogs.json');
+    let logs = [];
+    try {
+      logs = JSON.parse(fs.readFileSync(logsFile, 'utf8') || '[]');
+    } catch (e) {
+      logs = [];
+    }
+    logs.unshift({
+      id: Date.now(),
+      user: user || 'system',
+      action: action,
+      meta: meta || null,
+      ts: new Date().toISOString()
+    });
+    fs.writeFileSync(logsFile, JSON.stringify(logs, null, 2));
+  } catch (e) {
+    console.error('Failed to log activity:', e);
+  }
+};
 
 // Generate a human-readable reference ID like "PRE-2026-ABCD1234"
 const generateReferenceId = (): string => {
@@ -77,6 +104,17 @@ export const submitPreRegistration = async (req: Request, res: Response) => {
 
     // Determine initial status
     const status = file ? 'Payment Submitted' : 'Pending Payment';
+
+    // Log the submission
+    await logActivity('Student', 'PRE_REGISTRATION_SUBMITTED', {
+      reference_id: referenceId,
+      name: `${first_name} ${last_name}`,
+      email,
+      course,
+      admission_type,
+      status,
+      has_receipt: !!receiptPath
+    });
 
     await run(
       `INSERT INTO pre_registrations (
@@ -195,6 +233,16 @@ export const verifyCashierPayment = async (req: AuthRequest, res: Response) => {
          WHERE id = ?`,
         [remarks || null, userId, id]
       );
+      
+      // Log verification
+      const verified = await get('SELECT * FROM pre_registrations WHERE id = ?', [id]);
+      await logActivity(`Cashier-${userId}`, 'PAYMENT_VERIFIED', {
+        pre_reg_id: id,
+        reference_id: verified?.reference_id,
+        applicant: `${verified?.first_name} ${verified?.last_name}`,
+        remarks
+      });
+      
       res.json({ success: true, message: 'Payment verified. Application moved to admin queue.' });
     } else {
       await run(
@@ -203,6 +251,16 @@ export const verifyCashierPayment = async (req: AuthRequest, res: Response) => {
          WHERE id = ?`,
         [remarks || 'Payment receipt invalid. Please re-upload or contact support.', id]
       );
+      
+      // Log rejection
+      const rejected = await get('SELECT * FROM pre_registrations WHERE id = ?', [id]);
+      await logActivity(`Cashier-${userId}`, 'PAYMENT_REJECTED', {
+        pre_reg_id: id,
+        reference_id: rejected?.reference_id,
+        applicant: `${rejected?.first_name} ${rejected?.last_name}`,
+        remarks: remarks || 'Payment receipt invalid'
+      });
+      
       res.json({ success: true, message: 'Payment rejected. Student will need to re-upload.' });
     }
   } catch (error: any) {
@@ -306,6 +364,16 @@ export const createAccountFromPreReg = async (req: AuthRequest, res: Response) =
        WHERE id = ?`,
       [adminId, `Account created. Username: ${username}, Student ID: ${studentId}`, id]
     );
+
+    // Log account creation
+    await logActivity(`Admin-${adminId}`, 'ACCOUNT_CREATED_FROM_PREREG', {
+      pre_reg_id: id,
+      reference_id: record.reference_id,
+      student_id: studentId,
+      student_name: `${record.first_name} ${record.last_name}`,
+      username,
+      course: record.course
+    });
 
     res.json({
       success: true,

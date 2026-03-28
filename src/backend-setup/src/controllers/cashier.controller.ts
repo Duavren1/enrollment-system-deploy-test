@@ -991,4 +991,76 @@ export const updatePenaltyFeeConfig = async (req: AuthRequest, res: Response) =>
   }
 };
 
-export default { listPendingTransactions, listTransactions, processTransaction, cashierReport, listTuitionAssessments, approveTuitionAssessment, listInstallmentPayments, approveInstallmentPayment, rejectInstallmentPayment, listEnrollmentsForReview, updateEnrollmentFees, approveEnrollmentReview, rejectEnrollmentReview, getFees, updateFees, addInstallmentPenalty, getPenaltyFeeConfig, updatePenaltyFeeConfig };
+export const getAllPromissoryNotes = async (req: AuthRequest, res: Response) => {
+  try {
+    const status = (req.query.status as string) || 'Pending';
+    const notes = await query(
+      `SELECT pn.*,
+              s.first_name, s.last_name, s.student_id AS sid,
+              s.course, s.year_level,
+              e.school_year, e.semester,
+              u.username AS reviewed_by_name
+       FROM promissory_notes pn
+       JOIN students s ON pn.student_id = s.id
+       JOIN enrollments e ON pn.enrollment_id = e.id
+       LEFT JOIN users u ON pn.reviewed_by = u.id
+       WHERE pn.status = ?
+       ORDER BY pn.created_at DESC`,
+      [status]
+    );
+    res.json({ success: true, data: notes });
+  } catch (error) {
+    console.error('Get all promissory notes error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const reviewPromissoryNoteCashier = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { status, remarks } = req.body;
+
+    if (!status || !['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status. Must be Approved or Rejected' });
+    }
+
+    const note: any = await query('SELECT * FROM promissory_notes WHERE id = ?', [id]);
+    const noteRow = Array.isArray(note) ? note[0] : note;
+    if (!noteRow) {
+      return res.status(404).json({ success: false, message: 'Promissory note not found' });
+    }
+
+    await run(
+      `UPDATE promissory_notes SET status = ?, remarks = ?, reviewed_by = ?, reviewed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+      [status, remarks || '', userId, id]
+    );
+
+    // Notify student
+    try {
+      const student: any = await query('SELECT user_id FROM students WHERE id = ?', [noteRow.student_id]);
+      const studentRow = Array.isArray(student) ? student[0] : student;
+      if (studentRow?.user_id) {
+        await run(
+          `INSERT INTO notifications (user_id, title, message, type) VALUES (?, ?, ?, ?)`,
+          [studentRow.user_id, `Promissory Note ${status}`, `Your promissory note for ${noteRow.period} has been ${status.toLowerCase()}.${remarks ? ' Remarks: ' + remarks : ''}`, 'payment']
+        );
+      }
+    } catch (notifErr) {
+      console.error('Failed to send promissory note review notification:', notifErr);
+    }
+
+    // Log the activity
+    await run(
+      `INSERT INTO activity_logs (user_id, action, entity_type, entity_id, description) VALUES (?, ?, ?, ?, ?)`,
+      [userId, `REVIEW_PROMISSORY_NOTE_${status.toUpperCase()}`, 'promissory_note', parseInt(id as string), `${status} promissory note for ${noteRow.period}`]
+    );
+
+    res.json({ success: true, message: `Promissory note ${status.toLowerCase()} successfully` });
+  } catch (error) {
+    console.error('Review promissory note error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export default { listPendingTransactions, listTransactions, processTransaction, cashierReport, listTuitionAssessments, approveTuitionAssessment, listInstallmentPayments, approveInstallmentPayment, rejectInstallmentPayment, listEnrollmentsForReview, updateEnrollmentFees, approveEnrollmentReview, rejectEnrollmentReview, getFees, updateFees, addInstallmentPenalty, getPenaltyFeeConfig, updatePenaltyFeeConfig, getAllPromissoryNotes, reviewPromissoryNoteCashier };

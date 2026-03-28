@@ -13,9 +13,18 @@ function writePayments(items: any[]) { fs.writeFileSync(paymentsFile, JSON.strin
 export const getAssessment = async (req: Request, res: Response) => {
   const { studentId } = req.params;
   try {
-    // Try to find the latest enrollment for this student (by student.student_id)
+    // Find the current active enrollment for this student (matching active school year & semester)
     const rows = await query(
-      `SELECT e.* FROM enrollments e JOIN students s ON e.student_id = s.id WHERE s.student_id = ? ORDER BY e.created_at DESC LIMIT 1`,
+      `SELECT e.* FROM enrollments e
+       JOIN students s ON e.student_id = s.id
+       LEFT JOIN school_years sy ON e.school_year = sy.school_year
+       LEFT JOIN semesters sem ON sy.id = sem.school_year_id
+         AND ((e.semester = '1st' AND sem.semester_number = 1)
+           OR (e.semester = '2nd' AND sem.semester_number = 2)
+           OR (e.semester = '3rd' AND sem.semester_number = 3))
+       WHERE s.student_id = ?
+       ORDER BY CASE WHEN sy.is_active = 1 AND sem.is_active = 1 THEN 0 ELSE 1 END, e.created_at DESC
+       LIMIT 1`,
       [studentId]
     );
 
@@ -37,19 +46,13 @@ export const getAssessment = async (req: Request, res: Response) => {
       breakdown = { tuition, misc: registration + library + lab + id_fee + others };
     }
 
-    // Calculate paid amount from database transactions for this student
-    const studentRows = await query(
-      `SELECT id FROM students WHERE student_id = ? LIMIT 1`,
-      [studentId]
-    );
-
+    // Calculate paid amount scoped to THIS enrollment only (not all semesters)
     let paid = 0;
-    if (studentRows && studentRows[0]) {
+    if (enrollment) {
       const paymentRows = await query(
-        `SELECT SUM(amount) as total_paid FROM transactions t
-         JOIN enrollments e ON t.enrollment_id = e.id
-         WHERE e.student_id = ? AND t.status IN ('Completed', 'Pending')`,
-        [studentRows[0].id]
+        `SELECT SUM(amount) as total_paid FROM transactions
+         WHERE enrollment_id = ? AND status IN ('Completed', 'Pending')`,
+        [enrollment.id]
       );
       if (paymentRows && paymentRows[0] && paymentRows[0].total_paid) {
         paid = Number(paymentRows[0].total_paid);
@@ -81,17 +84,33 @@ export const listPayments = async (req: Request, res: Response) => {
 
     const student = studentRows[0];
 
-    // Get all payments from transactions table for this student's enrollments
-    const payments = await query(
+    // Get payments from transactions table scoped to the current active enrollment
+    // First find the active enrollment for this student
+    const activeEnrollment = await query(
+      `SELECT e.id FROM enrollments e
+       JOIN students s ON e.student_id = s.id
+       LEFT JOIN school_years sy ON e.school_year = sy.school_year
+       LEFT JOIN semesters sem ON sy.id = sem.school_year_id
+         AND ((e.semester = '1st' AND sem.semester_number = 1)
+           OR (e.semester = '2nd' AND sem.semester_number = 2)
+           OR (e.semester = '3rd' AND sem.semester_number = 3))
+       WHERE s.student_id = ?
+       ORDER BY CASE WHEN sy.is_active = 1 AND sem.is_active = 1 THEN 0 ELSE 1 END, e.created_at DESC
+       LIMIT 1`,
+      [studentId]
+    );
+
+    const enrollmentId = activeEnrollment?.[0]?.id;
+    const payments = enrollmentId ? await query(
       `SELECT t.*, e.student_id, s.student_id as sid,
               (SELECT username FROM users WHERE id = t.processed_by) as cashier_name
        FROM transactions t
        JOIN enrollments e ON t.enrollment_id = e.id
        JOIN students s ON e.student_id = s.id
-       WHERE s.student_id = ?
+       WHERE t.enrollment_id = ?
        ORDER BY t.created_at DESC`,
-      [studentId]
-    );
+      [enrollmentId]
+    ) : [];
 
     // Map to match the expected format
     const mappedPayments = (payments || []).map((p: any) => ({
@@ -128,16 +147,30 @@ export const getApprovedPayments = async (req: Request, res: Response) => {
       return res.json({ success: true, data: [] });
     }
 
-    // Get approved installment payments from the database
-    const approvedPayments = await query(
+    // Get approved installment payments scoped to the current active enrollment
+    const activeEnrollment = await query(
+      `SELECT e.id FROM enrollments e
+       LEFT JOIN school_years sy ON e.school_year = sy.school_year
+       LEFT JOIN semesters sem ON sy.id = sem.school_year_id
+         AND ((e.semester = '1st' AND sem.semester_number = 1)
+           OR (e.semester = '2nd' AND sem.semester_number = 2)
+           OR (e.semester = '3rd' AND sem.semester_number = 3))
+       WHERE e.student_id = ?
+       ORDER BY CASE WHEN sy.is_active = 1 AND sem.is_active = 1 THEN 0 ELSE 1 END, e.created_at DESC
+       LIMIT 1`,
+      [student.id]
+    );
+
+    const enrollmentId = activeEnrollment?.[0]?.id;
+    const approvedPayments = enrollmentId ? await query(
       `SELECT ip.*, s.student_id, e.total_amount
        FROM installment_payments ip
        LEFT JOIN students s ON ip.student_id = s.id
        LEFT JOIN enrollments e ON ip.enrollment_id = e.id
-       WHERE ip.student_id = ? AND ip.status = 'Approved'
+       WHERE ip.enrollment_id = ? AND ip.status = 'Approved'
        ORDER BY ip.created_at DESC`,
-      [student.id]
-    );
+      [enrollmentId]
+    ) : [];
 
     res.json({ success: true, data: approvedPayments || [] });
   } catch (err) {
@@ -233,42 +266,9 @@ export const submitInstallmentPayment = async (req: Request, res: Response) => {
     const actualAmountPaid = amountPaid || amount;
     console.log('actualAmountPaid to store:', actualAmountPaid);
 
-    // --- Auto-apply penalty fee if payment is past due ---
-    // Only apply to regular period payments, not to penalty fee payments themselves
+    // Penalty fees are managed by the cashier, not auto-applied on submit
+    const penaltyToApply = 0;
     const isPenaltyFeePayment = period.includes('- Late Penalty Fee');
-    let penaltyToApply = 0;
-
-    if (!isPenaltyFeePayment) {
-      // Get enrollment date to calculate due date
-      const enrollmentRows = await query(
-        `SELECT enrollment_date, created_at FROM enrollments WHERE id = ?`,
-        [enrollmentId]
-      );
-      const enrollment = enrollmentRows && enrollmentRows[0] ? enrollmentRows[0] : null;
-
-      if (enrollment) {
-        const enrollDate = new Date(enrollment.enrollment_date || enrollment.created_at);
-        const periodMonthOffset: Record<string, number> = {
-          'Down Payment': 0,
-          'Prelim Period': 1,
-          'Midterm Period': 2,
-          'Finals Period': 3
-        };
-        const offset = periodMonthOffset[period] ?? 1;
-        const dueDate = new Date(enrollDate);
-        dueDate.setMonth(dueDate.getMonth() + offset);
-        const now = new Date();
-
-        if (now > dueDate) {
-          // Payment is past due - fetch the configured penalty fee
-          const settingRows = await query(
-            `SELECT setting_value FROM system_settings WHERE setting_key = 'installment_penalty_fee' LIMIT 1`
-          );
-          penaltyToApply = settingRows && settingRows[0] ? parseFloat(settingRows[0].setting_value) : 500.00;
-          console.log(`Payment for ${period} is past due. Auto-applying penalty of ₱${penaltyToApply}`);
-        }
-      }
-    }
 
     // Check if there's an existing rejected payment for this period that can be resubmitted
     const existingPayment = await query(

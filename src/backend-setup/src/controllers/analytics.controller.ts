@@ -140,6 +140,14 @@ export const getCashierSummary = async (req: Request, res: Response) => {
       `SELECT COUNT(*) as total FROM transactions WHERE status = 'Pending'`
     );
 
+    // Total transaction count (all statuses) for "Logged Transactions" stat
+    const totalTxCount = await query(
+      `SELECT COUNT(*) as total FROM transactions`
+    );
+    const totalInstallmentCount = await query(
+      `SELECT COUNT(*) as total FROM installment_payments`
+    );
+
     const recent = await query(
       `SELECT t.id, t.enrollment_id, t.amount, t.status, t.payment_method, t.created_at,
               s.student_id, s.first_name || ' ' || s.last_name as student_name
@@ -156,6 +164,7 @@ export const getCashierSummary = async (req: Request, res: Response) => {
         totalCollections: totalCollections,
         outstandingBalances: outstanding[0]?.balance || 0,
         pendingCount: pending[0]?.total || 0,
+        totalTransactions: (totalTxCount[0]?.total || 0) + (totalInstallmentCount[0]?.total || 0),
         recent
       }
     });

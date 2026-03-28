@@ -23,7 +23,7 @@ export const getStudentGrades = async (req: AuthRequest, res: Response) => {
       JOIN enrollments e ON es.enrollment_id = e.id
       JOIN subjects s ON es.subject_id = s.id
       JOIN students st ON e.student_id = st.id
-      WHERE st.student_id = ?
+      WHERE st.student_id = ? AND e.status IN ('Approved', 'Enrolled')
     `;
     const params: any[] = [studentId];
 
@@ -78,7 +78,7 @@ export const getMyGrades = async (req: AuthRequest, res: Response) => {
       JOIN enrollments e ON es.enrollment_id = e.id
       JOIN subjects s ON es.subject_id = s.id
       JOIN students st ON e.student_id = st.id
-      WHERE st.user_id = ?
+      WHERE st.user_id = ? AND e.status IN ('Approved', 'Enrolled')
     `;
     const params: any[] = [userId];
 
@@ -118,6 +118,22 @@ export const updateGrade = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { grade } = req.body;
     const userId = req.user?.id;
+
+    // Validate that the enrollment subject belongs to an enrolled student
+    const enrollmentSubject = await query(
+      `SELECT es.*, e.status FROM enrollment_subjects es 
+       JOIN enrollments e ON es.enrollment_id = e.id 
+       WHERE es.id = ?`,
+      [id]
+    );
+
+    if (!enrollmentSubject || enrollmentSubject.length === 0) {
+      return res.status(404).json({ success: false, message: 'Enrollment subject not found' });
+    }
+
+    if (!['Approved', 'Enrolled'].includes(enrollmentSubject[0]?.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot update grades for non-enrolled students' });
+    }
 
     await run(
       `UPDATE enrollment_subjects SET 
@@ -159,6 +175,24 @@ export const bulkUpdateGrades = async (req: AuthRequest, res: Response) => {
         await run("ALTER TABLE enrollment_subjects ADD COLUMN grade_status TEXT DEFAULT NULL");
       }
     } catch (e) {}
+
+    // Validate all enrollment subjects belong to enrolled students
+    for (const g of grades) {
+      const enrollmentSubject = await query(
+        `SELECT es.*, e.status FROM enrollment_subjects es 
+         JOIN enrollments e ON es.enrollment_id = e.id 
+         WHERE es.id = ?`,
+        [g.enrollment_subject_id]
+      );
+
+      if (!enrollmentSubject || enrollmentSubject.length === 0) {
+        return res.status(404).json({ success: false, message: `Enrollment subject ${g.enrollment_subject_id} not found` });
+      }
+
+      if (!['Approved', 'Enrolled'].includes(enrollmentSubject[0]?.status)) {
+        return res.status(400).json({ success: false, message: `Cannot update grades for non-enrolled students (ID: ${g.enrollment_subject_id})` });
+      }
+    }
 
     const updatePromises = grades.map((g: any) =>
       run(
@@ -322,6 +356,32 @@ export const approveGrade = async (req: AuthRequest, res: Response) => {
     res.json({ success: true, message: 'Grade approved successfully', data: { id: result.lastInsertRowid } });
   } catch (error) {
     console.error('Approve grade error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Reject a submitted grade (dean sends it back)
+export const rejectGrade = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params; // enrollment_subject id
+    const { remarks } = req.body;
+    const userId = req.user?.id;
+
+    // Clear the grade and reset grade_status so admin can re-enter
+    await run(
+      `UPDATE enrollment_subjects SET grade = NULL, grade_status = 'Rejected', updated_at = datetime('now', 'utc') || 'Z' WHERE id = ?`,
+      [id]
+    );
+
+    // Log activity
+    await run(
+      'INSERT INTO activity_logs (user_id, action, entity_type, entity_id, description) VALUES (?, ?, ?, ?, ?)',
+      [userId, 'REJECT_GRADE', 'enrollment_subject', id, `Grade rejected by dean${remarks ? ': ' + remarks : ''}`]
+    );
+
+    res.json({ success: true, message: 'Grade rejected successfully' });
+  } catch (error) {
+    console.error('Reject grade error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
