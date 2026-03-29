@@ -226,7 +226,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [installmentPayments, setInstallmentPayments] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
-  const [accountRequests, setAccountRequests] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -264,15 +263,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     isLoading: false
   });
 
-  const [editAccountOpen, setEditAccountOpen] = useState(false);
-  const [editingAccountRequest, setEditingAccountRequest] = useState<any>(null);
-  const [editAccountForm, setEditAccountForm] = useState<any>({
-    student_id: '',
-  });
-  const [viewProfileOpen, setViewProfileOpen] = useState(false);
-  const [viewingProfile, setViewingProfile] = useState<any>(null);
-
-  // Pre-registration application queue state
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [preRegAdminQueue, setPreRegAdminQueue] = useState<any[]>([]);
   const [loadingPreRegAdmin, setLoadingPreRegAdmin] = useState(false);
   const [preRegCreateId, setPreRegCreateId] = useState<number | null>(null);
@@ -500,33 +491,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         } catch (err) {
           console.error('Failed to fetch installment payments:', err);
           setInstallmentPayments([]);
-        }
-      }
-
-      // Fetch account requests
-      if (activeSection === 'Account Requests') {
-        try {
-          const accountRequestsData = await adminService.getAllStudents();
-          const accountList = accountRequestsData.data
-            ?.filter((s: any) => s.status !== 'Active')
-            ?.map((s: any) => ({
-              ...s,
-              id: s.student_id,
-              studentId: s.id,
-              dbId: s.id,
-              name: `${s.first_name || ''} ${s.last_name || ''}`.trim(),
-              course: s.course || 'N/A',
-              year: s.year_level ? `${s.year_level}${getOrdinalSuffix(s.year_level)}` : 'N/A',
-              section: s.section || 'N/A',
-              studentType: s.student_type || 'New',
-              email: s.email || 'N/A',
-              contactNumber: s.contact_number || 'N/A',
-              status: s.status || 'Pending'
-            })) || [];
-          setAccountRequests(accountList);
-        } catch (err) {
-          console.error('Failed to fetch account requests:', err);
-          setAccountRequests([]);
         }
       }
 
@@ -1889,133 +1853,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     </div>
   );
 
-  const renderAccountRequestsContent = () => (
-    <div>
-      <Card className="border-0 shadow-lg">
-        <div className="p-6">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
-            </div>
-          ) : accountRequests.length === 0 ? (
-            <p className="text-sm text-slate-500 text-center py-12">No pending account requests</p>
-          ) : (
-            <div className="space-y-3">
-              {accountRequests.map((request, index) => (
-                <div key={index} className="p-4 border rounded-lg hover:bg-slate-50">
-                  <h4 className="text-slate-900 mb-2">{request.name}</h4>
-                  <p className="text-sm text-slate-500 mb-3">
-                    {request.id} • {request.studentType} • {request.email}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button 
-                      size="sm"
-                      variant="outline"
-                      className="gap-2"
-                      onClick={() => {
-                        setViewingProfile(request);
-                        setViewProfileOpen(true);
-                      }}
-                    >
-                      <Eye className="h-4 w-4" />
-                      View Profile
-                    </Button>
-                    {request.status === 'Pending' && (
-                      <>
-                    <Button 
-                      size="sm"
-                      style={{ backgroundColor: '#16a34a', color: 'white' }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
-                      className="gap-2"
-                      onClick={() => {
-                        setConfirmData({
-                          title: 'Approve Account Request',
-                          message: `Are you sure you want to approve the account request for ${request.name}?`,
-                          onConfirm: async () => {
-                            try {
-                              setLoadingSection(`approve-${request.dbId}`);
-                              await adminService.approveAccountRequest(request.dbId);
-                              alert('Account request approved successfully');
-                              await fetchDashboardData();
-                            } catch (err: any) {
-                              alert(err.message || 'Failed to approve request');
-                            } finally {
-                              setLoadingSection(null);
-                            }
-                          },
-                          onCancel: () => {},
-                          isLoading: loadingSection === `approve-${request.dbId}`
-                        });
-                        setConfirmOpen(true);
-                      }}
-                    >
-                      <CheckIcon className="h-4 w-4" />
-                      Approve
-                    </Button>
-                    <Button 
-                      size="sm"
-                      variant="outline"
-                      className="text-red-600 hover:bg-red-50 border-red-200 gap-2"
-                      onClick={() => {
-                        setConfirmData({
-                          title: 'Reject Account Request',
-                          message: `Are you sure you want to reject the account request for ${request.name}?`,
-                          onConfirm: async () => {
-                            try {
-                              setLoadingSection(`reject-${request.dbId}`);
-                              await adminService.rejectAccountRequest(request.dbId);
-                              alert('Account request rejected');
-                              await fetchDashboardData();
-                            } catch (err: any) {
-                              alert(err.message || 'Failed to reject request');
-                            } finally {
-                              setLoadingSection(null);
-                            }
-                          },
-                          onCancel: () => {},
-                          isLoading: loadingSection === `reject-${request.dbId}`
-                        });
-                        setConfirmOpen(true);
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                      Reject
-                    </Button>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <Badge className={`border-0 ${
-                      request.status === 'Approved' 
-                        ? 'bg-green-100 text-green-700'
-                        : request.status === 'Rejected'
-                        ? 'bg-red-100 text-red-700'
-                        : 'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      Status: {request.status || 'Pending'}
-                    </Badge>
-                    <Badge className="bg-blue-100 text-blue-700 border-0">
-                      Type: {request.studentType}
-                    </Badge>
-                    {request.course && request.course !== 'N/A' && (
-                      <Badge className="bg-purple-100 text-purple-700 border-0">
-                        {request.course}
-                      </Badge>
-                    )}
-                  </div>
-                  {request.contactNumber && request.contactNumber !== 'N/A' && (
-                    <p className="text-xs text-slate-600 mt-2">Contact: {request.contactNumber}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
-  );
-
   const renderAuditTrailContent = () => {
     const loadAuditTrail = async () => {
       try {
@@ -3328,18 +3165,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             </button>
             
             <button
-              onClick={() => setActiveSection('Account Requests')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                activeSection === 'Account Requests' 
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg' 
-                  : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <UserPlus className="h-5 w-5" />
-              Account Requests
-            </button>
-
-            <button
               onClick={() => setActiveSection('Audit Trail')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                 activeSection === 'Audit Trail' 
@@ -3472,7 +3297,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   {activeSection === 'SHS Subjects' && 'SHS Subjects'}
                   {activeSection === 'College Subjects' && 'College Subjects'}
                   {activeSection === 'School Year' && 'School Year and Semesters'}
-                  {activeSection === 'Account Requests' && 'Account Requests'}
                   {activeSection === 'Audit Trail' && 'Audit Trail'}
                   {activeSection === 'Transactions' && 'Transactions'}
                   {activeSection === 'Installment Payments' && 'Installment Payments'}
@@ -3483,7 +3307,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <p className="text-sm text-slate-600">
                   {activeSection === 'Dashboard' && 'Welcome back to your administration portal'}
                   {activeSection === 'Enrollment Request' && 'Review and manage all student enrollment submissions'}
-                  {activeSection === 'Account Requests' && 'Approve or reject pending student account requests'}
                   {activeSection === 'Audit Trail' && 'View all modifications made by non-student roles'}
                   {activeSection === 'Manage Students' && 'Add, update, and manage student records'}
                   {activeSection === 'Manage Teachers' && 'Manage teacher/faculty accounts and information'}
@@ -3515,7 +3338,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             {/* Dynamic Content */}
             {activeSection === 'Dashboard' && renderDashboardContent()}
             {activeSection === 'Enrollment Request' && renderEnrollmentRequestsContent()}
-            {activeSection === 'Account Requests' && renderAccountRequestsContent()}
             {activeSection === 'Audit Trail' && renderAuditTrailContent()}
             {activeSection === 'Manage Students' && renderManageStudentsContent()}
             {activeSection === 'Manage Teachers' && renderManageFacultyContent()}
@@ -3531,148 +3353,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             {activeSection === 'Application Queue' && renderApplicationQueueContent()}
           </div>
         </div>
-
-        {/* View Account Profile Dialog */}
-      <Dialog open={viewProfileOpen} onOpenChange={setViewProfileOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Student Profile</DialogTitle>
-          </DialogHeader>
-          {viewingProfile && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-600">First Name</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.first_name || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Last Name</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.last_name || 'N/A'}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-600">Student No.</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.id}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Email</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.email || 'N/A'}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-600">Contact Number</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.contactNumber || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Student Type</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.studentType}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-slate-600">Course</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.course || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-slate-600">Year Level</Label>
-                  <p className="mt-1 text-sm">{viewingProfile.year || 'N/A'}</p>
-                </div>
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 mt-6">
-            <Button variant="outline" onClick={() => setViewProfileOpen(false)}>Close</Button>
-            <Button 
-              className="gap-2"
-              onClick={() => {
-                setViewProfileOpen(false);
-                setEditingAccountRequest(viewingProfile);
-                setEditAccountForm({ student_id: viewingProfile.id });
-                setEditAccountOpen(true);
-              }}
-            >
-              <Edit className="h-4 w-4" />
-              Edit
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Account Student ID Dialog */}
-      <Dialog open={editAccountOpen} onOpenChange={setEditAccountOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Student No.</DialogTitle>
-          </DialogHeader>
-          {editingAccountRequest && (
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                setLoadingSection('edit-account');
-                // Update the student record with new student_id and username
-                await adminService.updateStudent(editingAccountRequest.dbId, {
-                  student_id: editAccountForm.student_id,
-                  username: editAccountForm.student_id
-                });
-                alert('Student number and login updated successfully');
-                setEditAccountOpen(false);
-                await fetchDashboardData();
-              } catch (err: any) {
-                alert(err.message || 'Failed to update student number');
-              } finally {
-                setLoadingSection(null);
-              }
-            }} className="space-y-4">
-              <div>
-                <Label htmlFor="edit-student-id">Student No.</Label>
-                <Input
-                  id="edit-student-id"
-                  value={editAccountForm.student_id}
-                  onChange={(e) => setEditAccountForm({ ...editAccountForm, student_id: e.target.value })}
-                  className="mt-2"
-                  required
-                />
-              </div>
-              <div className="flex flex-wrap justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setEditAccountOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={loadingSection === 'edit-account'}>
-                  {loadingSection === 'edit-account' ? 'Saving...' : 'Save'}
-                </Button>
-                <Button 
-                  type="button"
-                  style={{ backgroundColor: '#16a34a', color: 'white' }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
-                  disabled={loadingSection === 'approve-account'}
-                  onClick={async () => {
-                    try {
-                      setLoadingSection('approve-account');
-                      // First update student_id and username
-                      await adminService.updateStudent(editingAccountRequest.dbId, {
-                        student_id: editAccountForm.student_id,
-                        username: editAccountForm.student_id
-                      });
-                      // Then approve the account
-                      await adminService.approveAccountRequest(editingAccountRequest.dbId);
-                      alert('Student number updated and account approved successfully');
-                      setEditAccountOpen(false);
-                      await fetchDashboardData();
-                    } catch (err: any) {
-                      alert(err.message || 'Failed to update and approve');
-                    } finally {
-                      setLoadingSection(null);
-                    }
-                  }}
-                >
-                  {loadingSection === 'approve-account' ? 'Approving...' : 'Save & Approve'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Confirmation Dialog */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
