@@ -407,6 +407,7 @@ CREATE TABLE IF NOT EXISTS courses_fees (
   lab REAL DEFAULT 2000.00,
   id_fee REAL DEFAULT 200.00,
   others REAL DEFAULT 300.00,
+  installment_fee REAL DEFAULT 500.00,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -452,7 +453,9 @@ CREATE TABLE IF NOT EXISTS pre_registrations (
   lab_fee REAL DEFAULT 0,
   id_fee REAL DEFAULT 0,
   others_fee REAL DEFAULT 0,
+  installment_fee REAL DEFAULT 0,
   total_assessment REAL DEFAULT 0,
+  amount_due REAL DEFAULT 0,
   receipt_file_path TEXT,
   receipt_file_name TEXT,
   status TEXT NOT NULL DEFAULT 'Pending Payment' CHECK(status IN (

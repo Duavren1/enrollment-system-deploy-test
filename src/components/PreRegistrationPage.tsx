@@ -23,7 +23,7 @@ type Step = 'info' | 'options' | 'assessment' | 'payment' | 'complete';
 const STEPS: { key: Step; label: string; icon: any }[] = [
   { key: 'info', label: 'Your Information', icon: ClipboardList },
   { key: 'options', label: 'Learning Options', icon: GraduationCap },
-  { key: 'assessment', label: 'Assessment', icon: FileText },
+  { key: 'assessment', label: 'Estimated Assessment', icon: FileText },
   { key: 'payment', label: 'Payment', icon: CreditCard },
   { key: 'complete', label: 'Complete', icon: CheckCircle },
 ];
@@ -61,7 +61,9 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
   const [assessment, setAssessment] = useState({
     tuition_per_unit: 0, total_units: DEFAULT_UNITS,
     tuition_fee: 0, registration_fee: 0, library_fee: 0, lab_fee: 0, id_fee: 0, others_fee: 0,
+    installment_fee: 0,
     total_assessment: 0,
+    amount_due: 0, // registration fee only — what the student actually pays now
   });
 
   // Phase 2: Payment
@@ -77,8 +79,8 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
       } catch (err) {
         console.error('Failed to load courses', err);
         setCourses([
-          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300 },
-          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300 },
+          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
+          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
         ]);
       }
     };
@@ -98,7 +100,9 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
     const lab = courseFee.lab || 2000;
     const idFee = courseFee.id_fee || 200;
     const others = courseFee.others || 300;
-    const total = tuition + reg + lib + lab + idFee + others;
+    const isInstallment = options.payment_terms !== 'Full';
+    const instFee = isInstallment ? (courseFee.installment_fee || 500) : 0;
+    const total = tuition + reg + lib + lab + idFee + others + instFee;
 
     setAssessment(prev => ({
       ...prev,
@@ -109,9 +113,11 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
       lab_fee: lab,
       id_fee: idFee,
       others_fee: others,
+      installment_fee: instFee,
       total_assessment: total,
+      amount_due: reg, // student only pays the registration fee at pre-registration
     }));
-  }, [options.course, assessment.total_units, courses]);
+  }, [options.course, options.payment_terms, assessment.total_units, courses]);
 
   const updateForm = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
   const updateOptions = (field: string, value: string) => setOptions(prev => ({ ...prev, [field]: value }));
@@ -162,7 +168,7 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
       // Phase 1 fields
       Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
       Object.entries(options).forEach(([k, v]) => { if (v) fd.append(k, v); });
-      // Assessment fields
+      // Assessment fields (includes installment_fee and amount_due)
       Object.entries(assessment).forEach(([k, v]) => fd.append(k, String(v)));
       // Receipt
       if (receiptFile) fd.append('receipt', receiptFile);
@@ -443,21 +449,21 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
             <div className="flex justify-between mt-8">
               <Button variant="outline" onClick={goPrev} className="gap-1"><ArrowLeft className="h-4 w-4" /> Back</Button>
               <Button onClick={goNext} className="bg-gradient-to-r from-blue-600 to-indigo-600 gap-1">
-                View Assessment <ArrowRight className="h-4 w-4" />
+                View Estimated Assessment <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
           </Card>
         )}
 
-        {/* ─── STEP 3: Assessment / Matriculation ─── */}
+        {/* ─── STEP 3: Estimated Assessment / Matriculation ─── */}
         {!showPrivacy && currentStep === 'assessment' && (
           <Card className="p-8 shadow-lg border-0">
-            <h2 className="text-xl font-bold mb-1">Assessment & Matriculation</h2>
-            <p className="text-sm text-slate-500 mb-6">Review your estimated fees below.</p>
+            <h2 className="text-xl font-bold mb-1">Estimated Assessment</h2>
+            <p className="text-sm text-slate-500 mb-6">Review your estimated fees below. Final assessment may change upon official enrollment.</p>
 
             <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
-                <h3 className="text-white font-bold text-lg">Fee Assessment — {options.course}</h3>
+                <h3 className="text-white font-bold text-lg">Estimated Fee Assessment — {options.course}</h3>
                 <p className="text-blue-100 text-sm">{options.learning_modality} · {options.payment_terms}</p>
               </div>
               <div className="p-6 space-y-3">
@@ -485,15 +491,32 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
                   <span className="text-sm text-slate-600">Others / Miscellaneous</span>
                   <span className="font-medium">{formatCurrency(assessment.others_fee)}</span>
                 </div>
-                <div className="flex justify-between pt-3 mt-2 border-t-2 border-blue-200">
-                  <span className="font-bold text-lg">Total Assessment</span>
-                  <span className="font-bold text-lg text-blue-600">{formatCurrency(assessment.total_assessment)}</span>
-                </div>
-                {options.payment_terms !== 'Full' && (
-                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                    <strong>Installment Note:</strong> You selected "{options.payment_terms}". Payment breakdowns will be finalized by the cashier upon verification.
+                {assessment.installment_fee > 0 && (
+                  <div className="flex justify-between py-2 border-b border-slate-200">
+                    <span className="text-sm text-slate-600">Installment Fee</span>
+                    <span className="font-medium">{formatCurrency(assessment.installment_fee)}</span>
                   </div>
                 )}
+                <div className="flex justify-between pt-3 mt-2 border-t-2 border-blue-200">
+                  <span className="font-bold text-lg">Total Estimated Assessment</span>
+                  <span className="font-bold text-lg text-blue-600">{formatCurrency(assessment.total_assessment)}</span>
+                </div>
+
+                {/* Registration fee callout — what the student actually pays now */}
+                <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="font-semibold text-green-800">Amount Due Now (Registration Fee)</span>
+                      <p className="text-xs text-green-700 mt-0.5">Pay the registration fee to secure your slot and receive your student account.</p>
+                    </div>
+                    <span className="font-bold text-xl text-green-700">{formatCurrency(assessment.amount_due)}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                  <strong>Note:</strong> This is an <em>estimated assessment</em>. The remaining balance will be finalized and settled upon official enrollment.
+                  {options.payment_terms !== 'Full' && (<> You selected "{options.payment_terms}" — installment breakdowns will be arranged by the cashier upon enrollment.</>)}
+                </div>
               </div>
             </div>
 
@@ -509,17 +532,17 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
         {/* ─── STEP 4: Payment Upload ─── */}
         {!showPrivacy && currentStep === 'payment' && (
           <Card className="p-8 shadow-lg border-0">
-            <h2 className="text-xl font-bold mb-1">Payment Submission</h2>
-            <p className="text-sm text-slate-500 mb-6">Upload your payment receipt to complete your application.</p>
+            <h2 className="text-xl font-bold mb-1">Registration Fee Payment</h2>
+            <p className="text-sm text-slate-500 mb-6">Pay the registration fee to secure your slot, then upload your receipt below.</p>
 
-            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #3b82f6', borderRadius: '12px', padding: '20px', marginBottom: '24px' }}>
-              <h3 style={{ fontWeight: 600, color: '#1e293b', marginBottom: '8px', fontSize: '15px' }}>Registration Billing</h3>
+            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #22c55e', borderRadius: '12px', padding: '20px', marginBottom: '24px' }}>
+              <h3 style={{ fontWeight: 600, color: '#1e293b', marginBottom: '8px', fontSize: '15px' }}>Registration Fee — {options.course}</h3>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <span style={{ fontSize: '14px', color: '#334155' }}>Course: {options.course}</span>
-                <span style={{ fontWeight: 700, color: '#2563eb', fontSize: '16px' }}>{formatCurrency(assessment.total_assessment)}</span>
+                <span style={{ fontSize: '14px', color: '#334155' }}>Registration Fee (for account creation)</span>
+                <span style={{ fontWeight: 700, color: '#16a34a', fontSize: '20px' }}>{formatCurrency(assessment.amount_due)}</span>
               </div>
               <p style={{ fontSize: '12px', color: '#475569', marginTop: '8px' }}>
-                Please pay the total amount shown above via bank transfer, GCash, or over-the-counter at the campus cashier. Then upload your receipt image/PDF below.
+                Please pay the <strong>registration fee</strong> shown above via bank transfer, GCash, or over-the-counter at the campus cashier. This fee is required to create your student account. The remaining tuition and fees (estimated total: {formatCurrency(assessment.total_assessment)}) will be settled upon official enrollment.
               </p>
             </div>
 

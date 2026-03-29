@@ -790,6 +790,7 @@ async function setupDatabase() {
         lab REAL DEFAULT 2000.00,
         id_fee REAL DEFAULT 200.00,
         others REAL DEFAULT 300.00,
+        installment_fee REAL DEFAULT 500.00,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       )
@@ -885,7 +886,9 @@ async function setupDatabase() {
         lab_fee REAL DEFAULT 0,
         id_fee REAL DEFAULT 0,
         others_fee REAL DEFAULT 0,
+        installment_fee REAL DEFAULT 0,
         total_assessment REAL DEFAULT 0,
+        amount_due REAL DEFAULT 0,
 
         -- Phase 2: Payment
         receipt_file_path TEXT,
@@ -1263,8 +1266,8 @@ async function setupDatabase() {
       }
 
       const upsertCourseFee = db.prepare(`
-        INSERT INTO courses_fees (course, tuition_per_unit, registration, library, lab, id_fee, others)
-        VALUES (?, 700.00, 1500.00, 500.00, 2000.00, 200.00, 300.00)
+        INSERT INTO courses_fees (course, tuition_per_unit, registration, library, lab, id_fee, others, installment_fee)
+        VALUES (?, 700.00, 1500.00, 500.00, 2000.00, 200.00, 300.00, 500.00)
         ON CONFLICT(course) DO UPDATE SET
           tuition_per_unit = CASE WHEN tuition_per_unit = 0 OR tuition_per_unit IS NULL THEN 700.00 ELSE tuition_per_unit END,
           registration = CASE WHEN registration = 0 OR registration IS NULL THEN 1500.00 ELSE registration END,
@@ -1272,6 +1275,7 @@ async function setupDatabase() {
           lab = CASE WHEN lab = 0 OR lab IS NULL THEN 2000.00 ELSE lab END,
           id_fee = CASE WHEN id_fee = 0 OR id_fee IS NULL THEN 200.00 ELSE id_fee END,
           others = CASE WHEN others = 0 OR others IS NULL THEN 300.00 ELSE others END,
+          installment_fee = CASE WHEN installment_fee = 0 OR installment_fee IS NULL THEN 500.00 ELSE installment_fee END,
           updated_at = datetime('now')
       `);
       

@@ -49,7 +49,7 @@ const generateReferenceId = (): string => {
 export const getAvailableCourses = async (req: Request, res: Response) => {
   try {
     const courses = await query(
-      `SELECT course, tuition_per_unit, registration, library, lab, id_fee, others FROM courses_fees ORDER BY course`
+      `SELECT course, tuition_per_unit, registration, library, lab, id_fee, others, installment_fee FROM courses_fees ORDER BY course`
     );
 
     // If no courses_fees rows exist, return defaults
@@ -57,8 +57,8 @@ export const getAvailableCourses = async (req: Request, res: Response) => {
       return res.json({
         success: true,
         data: [
-          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300 },
-          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300 },
+          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
+          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
         ]
       });
     }
@@ -84,7 +84,8 @@ export const submitPreRegistration = async (req: Request, res: Response) => {
       learning_modality, course, payment_terms,
       // Assessment fields (computed on frontend, validated here)
       tuition_per_unit, total_units, tuition_fee,
-      registration_fee, library_fee, lab_fee, id_fee, others_fee, total_assessment,
+      registration_fee, library_fee, lab_fee, id_fee, others_fee,
+      installment_fee, total_assessment, amount_due,
     } = req.body;
 
     // Validate required fields
@@ -124,10 +125,11 @@ export const submitPreRegistration = async (req: Request, res: Response) => {
         admission_type, source_of_awareness,
         learning_modality, course, payment_terms,
         tuition_per_unit, total_units, tuition_fee,
-        registration_fee, library_fee, lab_fee, id_fee, others_fee, total_assessment,
+        registration_fee, library_fee, lab_fee, id_fee, others_fee,
+        installment_fee, total_assessment, amount_due,
         receipt_file_path, receipt_file_name,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         referenceId,
         first_name, middle_name || null, last_name, suffix || null,
@@ -135,7 +137,8 @@ export const submitPreRegistration = async (req: Request, res: Response) => {
         admission_type || 'New', source_of_awareness || null,
         learning_modality || 'Face-to-Face', course, payment_terms || 'Full',
         tuition_per_unit || 0, total_units || 0, tuition_fee || 0,
-        registration_fee || 0, library_fee || 0, lab_fee || 0, id_fee || 0, others_fee || 0, total_assessment || 0,
+        registration_fee || 0, library_fee || 0, lab_fee || 0, id_fee || 0, others_fee || 0,
+        installment_fee || 0, total_assessment || 0, amount_due || 0,
         receiptPath, receiptName,
         status
       ]
@@ -161,7 +164,8 @@ export const trackPreRegistration = async (req: Request, res: Response) => {
 
     const record = await get(
       `SELECT reference_id, first_name, last_name, email, course, admission_type,
-              learning_modality, payment_terms, total_assessment, status,
+              learning_modality, payment_terms, total_assessment, amount_due,
+              installment_fee, status,
               cashier_remarks, admin_remarks,
               created_at, verified_at, account_created_at
        FROM pre_registrations WHERE reference_id = ?`,
