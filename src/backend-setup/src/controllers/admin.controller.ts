@@ -579,7 +579,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         SUM(amount) as total_amount,
         SUM(CASE WHEN status = 'Completed' THEN amount ELSE 0 END) as completed_amount
        FROM transactions
-       WHERE strftime('%Y', payment_date) = strftime('%Y', 'now')`
+       WHERE EXTRACT(YEAR FROM payment_date::timestamp) = EXTRACT(YEAR FROM NOW())`
     );
 
     // Pre-registration application queue counts
