@@ -13,5 +13,12 @@
     "moduleResolution": "node"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "src/scripts/**/*"]
+  "exclude": [
+    "node_modules",
+    "src/scripts/**/*",
+    "src/database/setup.ts",
+    "src/database/add-sample-students.ts",
+    "src/database/connection.sqlite.ts",
+    "src/database/connection.pg.ts"
+  ]
 }
