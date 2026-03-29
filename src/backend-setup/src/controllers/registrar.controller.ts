@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import db, { query, run, get } from '../database/connection';
+import { query, run, get } from '../database/connection';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { sendEnrollmentNotification } from '../utils/notification.helper';
 
@@ -364,17 +364,12 @@ export const getEnrollmentForAssessment = async (req: AuthRequest, res: Response
 
       // Only auto-assign for non-Transferee/non-Irregular students
       if (shouldAutoAssign && availableSubjects.length > 0) {
-        const insertSubjectStmt = db.prepare(
-          'INSERT OR IGNORE INTO enrollment_subjects (enrollment_id, subject_id, status) VALUES (?, ?, ?)'
-        );
-        
-        const insertManySubjects = db.transaction((subjects: any[]) => {
-          for (const subject of subjects) {
-            insertSubjectStmt.run(enrollment.id, subject.id, 'Enrolled');
-          }
-        });
-
-        insertManySubjects(availableSubjects);
+        for (const subject of availableSubjects) {
+          await run(
+            'INSERT INTO enrollment_subjects (enrollment_id, subject_id, status) VALUES (?, ?, ?) ON CONFLICT DO NOTHING',
+            [enrollment.id, subject.id, 'Enrolled']
+          );
+        }
 
         // Fetch the newly assigned subjects
         subjects = await query(

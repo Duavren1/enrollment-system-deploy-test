@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: enrollment-system-api
+    runtime: node
+    region: singapore  # or your preferred region
+    plan: free
+    buildCommand: cd src/backend-setup && npm install && npm run build
+    startCommand: cd src/backend-setup && npm run start
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # set manually in Render dashboard
+      - key: DATABASE_SSL
+        value: true
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        sync: false  # set manually in Render dashboard
+      - key: FRONTEND_URL
+        sync: false  # set manually in Render dashboard

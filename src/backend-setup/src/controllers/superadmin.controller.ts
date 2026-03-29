@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
+// Database import removed — using PostgreSQL via connection module
 
 // User Management (Admin, Dean, Registrar)
 export const getAllUsers = async (req: AuthRequest, res: Response) => {
@@ -277,35 +277,23 @@ export const reassignSuperadmin = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Database Backup
+// Database Backup (PostgreSQL — managed by Supabase)
 export const backupDatabase = async (req: AuthRequest, res: Response) => {
   try {
-    const dbPath = process.env.DB_PATH || path.join(__dirname, '../../enrollment_system.db');
-    const backupDir = path.join(__dirname, '../../backups');
-    
-    // Create backups directory if it doesn't exist
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupPath = path.join(backupDir, `enrollment_system_${timestamp}.db`);
-
-    // Copy database file
-    fs.copyFileSync(dbPath, backupPath);
+    const timestamp = new Date().toISOString();
 
     // Log activity
     await run(
       'INSERT INTO activity_logs (user_id, action, entity_type, description) VALUES (?, ?, ?, ?)',
-      [req.user?.id, 'DATABASE_BACKUP', 'system', `Database backed up to ${backupPath}`]
+      [req.user?.id, 'DATABASE_BACKUP', 'system', `Database backup requested at ${timestamp}. Note: Supabase handles automated backups.`]
     );
 
     res.json({
       success: true,
-      message: 'Database backed up successfully',
+      message: 'Backup logged. Supabase provides automatic daily backups for your database.',
       data: {
-        backupPath: path.basename(backupPath),
-        timestamp: new Date().toISOString()
+        backupPath: 'supabase-managed',
+        timestamp
       }
     });
   } catch (error) {

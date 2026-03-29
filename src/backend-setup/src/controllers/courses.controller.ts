@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import db from '../database/connection';
+import { query } from '../database/connection';
 
 const dataDir = path.join(__dirname, '../../data');
 try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
@@ -13,15 +13,15 @@ function readCourses() {
 
 function writeCourses(items: any[]) { fs.writeFileSync(coursesFile, JSON.stringify(items, null, 2)); }
 
-export const listCourses = (req: Request, res: Response) => {
+export const listCourses = async (req: Request, res: Response) => {
   try {
     const jsonCourses = readCourses();
 
     // Also pull distinct courses from the database (courses_fees + subjects)
     const dbCourses: any[] = [];
     try {
-      const feeCourses = db.prepare('SELECT DISTINCT course FROM courses_fees WHERE course IS NOT NULL AND course != ""').all();
-      const subjectCourses = db.prepare('SELECT DISTINCT course FROM subjects WHERE course IS NOT NULL AND course != ""').all();
+      const feeCourses = await query("SELECT DISTINCT course FROM courses_fees WHERE course IS NOT NULL AND course != ''");
+      const subjectCourses = await query("SELECT DISTINCT course FROM subjects WHERE course IS NOT NULL AND course != ''");
       const seen = new Set(jsonCourses.map((c: any) => (c.program_code || '').toUpperCase()));
       for (const row of [...(feeCourses || []), ...(subjectCourses || [])]) {
         const name = (row as any).course;

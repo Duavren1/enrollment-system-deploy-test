@@ -37,16 +37,34 @@ const app: Express = express();
 const PORT = Number(process.env.PORT) || 5000;
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+];
+
+// Add production frontend URL from environment
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:5173',
-    /^http:\/\/192\.168\..*:[0-9]+$/,
-    /^http:\/\/10\..*:[0-9]+$/,
-    /^http:\/\/172\.20\..*:[0-9]+$/
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (
+      allowedOrigins.includes(origin) ||
+      /^https?:\/\/.*\.vercel\.app$/.test(origin) ||
+      /^http:\/\/192\.168\..*:[0-9]+$/.test(origin) ||
+      /^http:\/\/10\..*:[0-9]+$/.test(origin) ||
+      /^http:\/\/172\.20\..*:[0-9]+$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   credentials: true
 }));
 app.use(express.json());
