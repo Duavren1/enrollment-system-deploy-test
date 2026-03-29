@@ -4,8 +4,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Force IPv4 resolution — Render can't reach Supabase over IPv6
-dns.setDefaultResultOrder('ipv4first');
+// Supabase resolves to IPv6 by default — ensure we prefer IPv6
+dns.setDefaultResultOrder('verbatim');
 
 // ──────────────────────────────────────────────
 // PostgreSQL connection pool (Supabase)
