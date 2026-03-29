@@ -263,7 +263,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     isLoading: false
   });
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [preRegAdminQueue, setPreRegAdminQueue] = useState<any[]>([]);
   const [loadingPreRegAdmin, setLoadingPreRegAdmin] = useState(false);
   const [preRegCreateId, setPreRegCreateId] = useState<number | null>(null);

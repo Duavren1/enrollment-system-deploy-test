@@ -4,8 +4,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Supabase resolves to IPv6 by default — ensure we prefer IPv6
-dns.setDefaultResultOrder('verbatim');
+// Force IPv4 — Render is IPv4-only, use Supabase Session Pooler URL
+dns.setDefaultResultOrder('ipv4first');
 
 // ──────────────────────────────────────────────
 // PostgreSQL connection pool (Supabase)
