@@ -79,8 +79,8 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
       } catch (err) {
         console.error('Failed to load courses', err);
         setCourses([
-          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
-          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
+          { course: 'BSIT', tuition_per_unit: 700, registration: 500, library: 500, lab: 2000, id_fee: 200, others: 300 },
+          { course: 'BSCS', tuition_per_unit: 700, registration: 500, library: 500, lab: 2000, id_fee: 200, others: 300 },
         ]);
       }
     };
@@ -95,14 +95,15 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
 
     const units = assessment.total_units || DEFAULT_UNITS;
     const tuition = units * (courseFee.tuition_per_unit || 700);
-    const reg = courseFee.registration || 1500;
+    const reg = courseFee.registration || 500;
     const lib = courseFee.library || 500;
     const lab = courseFee.lab || 2000;
     const idFee = courseFee.id_fee || 200;
     const others = courseFee.others || 300;
     const isInstallment = options.payment_terms !== 'Full';
-    const instFee = isInstallment ? (courseFee.installment_fee || 500) : 0;
-    const total = tuition + reg + lib + lab + idFee + others + instFee;
+    const subtotal = tuition + reg + lib + lab + idFee + others;
+    const instFee = isInstallment ? Math.round(subtotal * 0.15 * 100) / 100 : 0;
+    const total = subtotal + instFee;
 
     setAssessment(prev => ({
       ...prev,
@@ -493,7 +494,7 @@ export default function PreRegistrationPage({ onBack }: PreRegistrationPageProps
                 </div>
                 {assessment.installment_fee > 0 && (
                   <div className="flex justify-between py-2 border-b border-slate-200">
-                    <span className="text-sm text-slate-600">Installment Fee</span>
+                    <span className="text-sm text-slate-600">Installment Fee (15%)</span>
                     <span className="font-medium">{formatCurrency(assessment.installment_fee)}</span>
                   </div>
                 )}

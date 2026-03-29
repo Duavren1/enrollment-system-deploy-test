@@ -785,7 +785,7 @@ async function setupDatabase() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         course TEXT UNIQUE NOT NULL,
         tuition_per_unit REAL DEFAULT 700.00,
-        registration REAL DEFAULT 1500.00,
+        registration REAL DEFAULT 500.00,
         library REAL DEFAULT 500.00,
         lab REAL DEFAULT 2000.00,
         id_fee REAL DEFAULT 200.00,
@@ -1267,10 +1267,10 @@ async function setupDatabase() {
 
       const upsertCourseFee = db.prepare(`
         INSERT INTO courses_fees (course, tuition_per_unit, registration, library, lab, id_fee, others, installment_fee)
-        VALUES (?, 700.00, 1500.00, 500.00, 2000.00, 200.00, 300.00, 500.00)
+        VALUES (?, 700.00, 500.00, 500.00, 2000.00, 200.00, 300.00, 500.00)
         ON CONFLICT(course) DO UPDATE SET
           tuition_per_unit = CASE WHEN tuition_per_unit = 0 OR tuition_per_unit IS NULL THEN 700.00 ELSE tuition_per_unit END,
-          registration = CASE WHEN registration = 0 OR registration IS NULL THEN 1500.00 ELSE registration END,
+          registration = CASE WHEN registration = 0 OR registration IS NULL THEN 500.00 ELSE registration END,
           library = CASE WHEN library = 0 OR library IS NULL THEN 500.00 ELSE library END,
           lab = CASE WHEN lab = 0 OR lab IS NULL THEN 2000.00 ELSE lab END,
           id_fee = CASE WHEN id_fee = 0 OR id_fee IS NULL THEN 200.00 ELSE id_fee END,

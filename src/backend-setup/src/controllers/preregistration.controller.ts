@@ -57,8 +57,8 @@ export const getAvailableCourses = async (req: Request, res: Response) => {
       return res.json({
         success: true,
         data: [
-          { course: 'BSIT', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
-          { course: 'BSCS', tuition_per_unit: 700, registration: 1500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
+          { course: 'BSIT', tuition_per_unit: 700, registration: 500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
+          { course: 'BSCS', tuition_per_unit: 700, registration: 500, library: 500, lab: 2000, id_fee: 200, others: 300, installment_fee: 500 },
         ]
       });
     }

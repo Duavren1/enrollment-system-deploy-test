@@ -402,7 +402,7 @@ CREATE TABLE IF NOT EXISTS courses_fees (
   id SERIAL PRIMARY KEY,
   course TEXT UNIQUE NOT NULL,
   tuition_per_unit REAL DEFAULT 700.00,
-  registration REAL DEFAULT 1500.00,
+  registration REAL DEFAULT 500.00,
   library REAL DEFAULT 500.00,
   lab REAL DEFAULT 2000.00,
   id_fee REAL DEFAULT 200.00,
